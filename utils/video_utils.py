@@ -73,7 +73,9 @@ def decode_video_frames(
         backend = get_safe_default_codec()
 
     if backend not in ["pyav", "video_reader"]:
-        logging.warning(f"Unsupported or disabled backend '{backend}', falling back to 'pyav'")
+        logging.warning(
+            f"Unsupported or disabled backend '{backend}', falling back to 'pyav'"
+        )
         backend = "pyav"
 
     return decode_video_frames_torchvision(video_path, timestamps, tolerance_s, backend)
@@ -267,7 +269,9 @@ def encode_video_frames(
     """More info on ffmpeg arguments tuning on `benchmark/video/README.md`"""
     # Check encoder availability
     if vcodec not in ["h264", "hevc", "libsvtav1"]:
-        raise ValueError(f"Unsupported video codec: {vcodec}. Supported codecs are: h264, hevc, libsvtav1.")
+        raise ValueError(
+            f"Unsupported video codec: {vcodec}. Supported codecs are: h264, hevc, libsvtav1."
+        )
 
     video_path = Path(video_path)
     imgs_dir = Path(imgs_dir)
@@ -284,7 +288,8 @@ def encode_video_frames(
     # Get input frames
     template = "frame_" + ("[0-9]" * 6) + ".png"
     input_list = sorted(
-        glob.glob(str(imgs_dir / template)), key=lambda x: int(x.split("_")[-1].split(".")[0])
+        glob.glob(str(imgs_dir / template)),
+        key=lambda x: int(x.split("_")[-1].split(".")[0]),
     )
 
     # Define video output frame size (assuming all input frames are the same size)
@@ -391,7 +396,9 @@ def get_audio_info(video_path: Path | str) -> dict:
         # In an ideal loseless case : bit depth x sample rate x channels = bit rate.
         # In an actual compressed case, the bit rate is set according to the compression level : the lower the bit rate, the more compression is applied.
         audio_info["audio.bit_rate"] = audio_stream.bit_rate
-        audio_info["audio.sample_rate"] = audio_stream.sample_rate  # Number of samples per second
+        audio_info["audio.sample_rate"] = (
+            audio_stream.sample_rate
+        )  # Number of samples per second
         # In an ideal loseless case : fixed number of bits per sample.
         # In an actual compressed case : variable number of bits per sample (often reduced to match a given depth rate).
         audio_info["audio.bit_depth"] = audio_stream.format.bits
