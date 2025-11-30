@@ -1,0 +1,4 @@
+[submodule "openpi"]
+	path = openpi
+	url = https://github.com/anlorla/openpi_npm.git
+	branch = openpi_npm
