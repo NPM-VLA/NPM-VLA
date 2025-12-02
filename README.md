@@ -149,11 +149,206 @@ XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_npm_lora --exp-n
 
 ## Inference
 
-TODO: Inference instructions will be added here
+After training is complete,  run inference using the trained policy checkpoint. The policy server loads the trained model and provides action predictions based on observations and prompts.
 
+### Start Policy Server
+
+Navigate to the OpenPI directory and run the policy server:
+
+```bash
+cd openpi
+uv run scripts/serve_policy.py policy:checkpoint \
+  --policy.config=pi05_npm_lora \
+  --policy.dir=/path/to/checkpoint/directory \
+  --default_prompt="your task description"
+```
+
+**Example:**
+
+```bash
+uv run scripts/serve_policy.py policy:checkpoint \
+  --policy.config=pi05_npm_lora \
+  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm_lora/sweep2E/2999 \
+  --default_prompt="sweep the blocks into an E shape"
+```
+
+**Parameters:**
+
+- `policy:checkpoint`: Specifies to load a checkpoint-based policy
+- `--policy.config`: Training configuration name 
+- `--policy.dir`: Path to the checkpoint directory (typically under `checkpoints/<config_name>/<exp_name>/<step>`)
+- `--default_prompt`: Default language instruction for the task (optional)
+
+**Notes:**
+
+- The checkpoint directory should contain the model weights and configuration files from training
+- The policy server will initialize the model and wait for observation inputs
+- Make sure the configuration name matches the one used during training 
 ## Deployment
 
-TODO: Deployment instructions will be added here
+This section covers deploying the trained policy on real robot hardware. The deployment process involves setting up the robot control system and connecting it with the trained VLA policy.
+
+### Prerequisites
+
+- Trained policy checkpoint (see [Training](#training) and [Inference](#inference) sections)
+- Policy server running (see [Inference](#inference) section)
+- Robot hardware setup (refer to [zeno-wholebody-teleop](https://github.com/Jeong-zju/zeno-wholebody-teleop))
+- ROS environment properly configured
+
+### 1. Configure Launch Files
+
+Before starting the robot, modify the ROS launch files to redirect control commands from teleoperation to VLA policy output.
+
+**Edit `piper_dual_robot.launch`:**
+
+Comment out the teleoperation command mapping and add VLA command mapping:
+
+```xml
+<!-- Original teleoperation mapping (comment out) -->
+<!-- <remap from="$(arg robot_prefix_left)joint_pos_cmd" to="$(arg teleop_prefix_left)joint_states_single"/> -->
+<!-- <remap from="$(arg robot_prefix_right)joint_pos_cmd" to="$(arg teleop_prefix_right)joint_states_single"/> -->
+
+<!-- New VLA policy mapping -->
+<remap from="$(arg robot_prefix_left)joint_pos_cmd" to="$(arg robot_prefix_left)vla_pos_cmd"/>
+<remap from="$(arg robot_prefix_right)joint_pos_cmd" to="$(arg robot_prefix_right)vla_pos_cmd"/>
+```
+
+**Why this change?**
+
+This remapping redirects the joint position commands from teleoperation topics to VLA policy output topics, allowing the trained model to control the robot instead of manual teleoperation.
+
+### 2. Start Robot Control System
+
+Source the ROS workspace and launch the robot control nodes:
+
+```bash
+# Source the workspace
+source devel/setup.bash
+
+# Launch the robot with all sensors
+roslaunch piper_bridge start_robot_all.launch \
+  ranger_can_port:=can0 \
+  left_can_port:=can_left \
+  right_can_port:=can_right \
+  enable_ranger:=false \
+  enable_paddle2ranger:=false \
+  enable_dual_arm:=true \
+  enable_cameras:=true \
+  enable_rviz:=true \
+  camera_left_usb_port:=2-1 \
+  camera_right_usb_port:=2-8 \
+  camera_top_usb_port:=2-2
+```
+
+**Parameters:**
+
+- `ranger_can_port`: CAN port for ranger base (can0)
+- `left_can_port`: CAN port for left arm (can_left)
+- `right_can_port`: CAN port for right arm (can_right)
+- `enable_dual_arm`: Enable dual-arm control
+- `enable_cameras`: Enable all RealSense cameras
+- `enable_rviz`: Launch RViz for visualization
+- `camera_*_usb_port`: USB ports for each camera
+
+### 3. Run VLA Policy Controller
+
+In a separate terminal, activate the Python environment and run the main control script:
+
+```bash
+# Activate the virtual environment
+source .venv/bin/activate
+
+# Set ROS master URI (adjust if running on a different machine)
+export ROS_MASTER_URI=http://localhost:11311
+
+# Run the VLA policy controller
+uv run scripts/piper_pi05_main.py
+```
+
+**What this script does:**
+
+1. **Observation Collection**: Subscribes to robot state and camera topics to gather observations
+   - Robot joint states: `/robot/arm_left/joint_states_single`, `/robot/arm_right/joint_states_single`
+   - Camera images: `/realsense_top/color/image_raw/compressed`, `/realsense_left/color/image_raw/compressed`, `/realsense_right/color/image_raw/compressed`
+
+2. **Policy Inference**: Sends observations to the policy server and receives action predictions
+   - Processes camera images (resizing, normalization)
+   - Combines multi-modal observations (images + proprioception)
+   - Queries the policy server for action predictions
+
+3. **Action Execution**: Publishes predicted actions to robot command topics
+   - Left arm actions: `/robot/arm_left/vla_pos_cmd`
+   - Right arm actions: `/robot/arm_right/vla_pos_cmd`
+
+### System Architecture
+
+```
+┌─────────────────────┐      ┌──────────────────┐      ┌─────────────────┐
+│  Robot Hardware     │◄─────│  ROS Bridge      │◄─────│  VLA Policy     │
+│  (Dual Arms +       │ CAN/ │  (piper_bridge)  │ ROS  │  Controller     │
+│   RealSense Cameras)│ USB  │                  │Topics│ (piper_pi05_    │
+│                     │      │                  │      │  main.py)       │
+└─────────────────────┘      └──────────────────┘      └─────────────────┘
+                                      │                         │
+                                      │ Observations            │ Actions
+                                      ▼                         ▼
+                             /robot/arm_*/             /robot/arm_*/
+                             joint_states              vla_pos_cmd
+                             /realsense_*/
+                             color/image_raw
+                                                                │
+                                                                │ HTTP
+                                                                ▼
+                                                       ┌─────────────────┐
+                                                       │  Policy Server  │
+                                                       │  (serve_policy  │
+                                                       │   .py)          │
+                                                       └─────────────────┘
+```
+
+### Deployment Workflow
+
+1. **Terminal 1**: Start the policy server (Inference)
+  ```bash
+  cd openpi
+
+  uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_npm_lora --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm_lora/sweep2E/2999
+
+  ```
+
+2. **Terminal 2**: Launch robot control system
+   
+  ```bash
+  cd <piper_ros>
+
+  source devel/setup.bash
+
+  export ROS_MASTER_URI=http://localhost:11311
+  # remember to setup the port before roslaunch
+  roslaunch piper_bridge start_robot_all.launch \
+  ranger_can_port:=can0 \
+  left_can_port:=can_left \
+  right_can_port:=can_right \
+  enable_ranger:=false \
+  enable_paddle2ranger:=false \
+  enable_dual_arm:=true \
+  enable_cameras:=true \
+  enable_rviz:=true \
+  camera_left_usb_port:=2-1 \
+  camera_right_usb_port:=2-8 \
+  camera_top_usb_port:=2-2
+   ```
+
+1. Terminal 3: Run VLA policy controller
+
+```bash
+  source .venv/bin/activate
+
+  export ROS_MASTER_URI=http://localhost:11311
+  
+  uv run scripts/piper_pi05_main.py
+  ```
+
 
 ## Troubleshooting
 
