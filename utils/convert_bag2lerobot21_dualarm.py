@@ -333,14 +333,15 @@ def process_single_bag(args):
                 action_left_msg = action_left_msgs[idx_al][1]
                 action_right_msg = action_right_msgs[idx_ar][1]
 
-                # 16 维 state: 8 左 + 8 右
                 q_robot_left = np.array(state_left_msg.position, dtype=np.float32)
                 q_robot_right = np.array(state_right_msg.position, dtype=np.float32)
-                state_vec = np.zeros(16, dtype=np.float32)
-                n_sl = min(8, q_robot_left.shape[0])
-                n_sr = min(8, q_robot_right.shape[0])
+
+                state_vec = np.zeros(14, dtype=np.float32)
+                n_sl = min(7, q_robot_left.shape[0])
+                n_sr = min(7, q_robot_right.shape[0])
+
                 state_vec[:n_sl] = q_robot_left[:n_sl]
-                state_vec[8 : 8 + n_sr] = q_robot_right[:n_sr]
+                state_vec[7 : 7 + n_sr] = q_robot_right[:n_sr]
 
                 q_tele_left = np.array(action_left_msg.position, dtype=np.float32)
                 q_tele_right = np.array(action_right_msg.position, dtype=np.float32)
@@ -415,9 +416,9 @@ if __name__ == "__main__":
         },
         "observation.state": {
             "dtype": "float32",
-            "shape": (16,),
-            "names": [f"left_joint_{i}" for i in range(8)]
-            + [f"right_joint_{i}" for i in range(8)],
+            "shape": (14,),
+            "names": [f"left_joint_{i}" for i in range(7)]
+            + [f"right_joint_{i}" for i in range(7)],
         },
         "observation.images.main": {
             "dtype": "video",

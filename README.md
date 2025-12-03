@@ -175,7 +175,7 @@ uv run scripts/serve_policy.py policy:checkpoint \
 **Parameters:**
 
 - `policy:checkpoint`: Specifies to load a checkpoint-based policy
-- `--policy.config`: Training configuration name 
+- `--policy.config`: Training configuration name
 - `--policy.dir`: Path to the checkpoint directory (typically under `checkpoints/<config_name>/<exp_name>/<step>`)
 - `--default_prompt`: Default language instruction for the task (optional)
 
@@ -183,7 +183,8 @@ uv run scripts/serve_policy.py policy:checkpoint \
 
 - The checkpoint directory should contain the model weights and configuration files from training
 - The policy server will initialize the model and wait for observation inputs
-- Make sure the configuration name matches the one used during training 
+- Make sure the configuration name matches the one used during training
+
 ## Deployment
 
 This section covers deploying the trained policy on real robot hardware. The deployment process involves setting up the robot control system and connecting it with the trained VLA policy.
@@ -268,15 +269,16 @@ uv run scripts/piper_pi05_main.py
 **What this script does:**
 
 1. **Observation Collection**: Subscribes to robot state and camera topics to gather observations
+
    - Robot joint states: `/robot/arm_left/joint_states_single`, `/robot/arm_right/joint_states_single`
    - Camera images: `/realsense_top/color/image_raw/compressed`, `/realsense_left/color/image_raw/compressed`, `/realsense_right/color/image_raw/compressed`
-
 2. **Policy Inference**: Sends observations to the policy server and receives action predictions
+
    - Processes camera images (resizing, normalization)
    - Combines multi-modal observations (images + proprioception)
    - Queries the policy server for action predictions
-
 3. **Action Execution**: Publishes predicted actions to robot command topics
+
    - Left arm actions: `/robot/arm_left/vla_pos_cmd`
    - Right arm actions: `/robot/arm_right/vla_pos_cmd`
 
@@ -309,16 +311,17 @@ uv run scripts/piper_pi05_main.py
 ### Deployment Workflow
 
 1. **Terminal 1**: Start the policy server (Inference)
-  ```bash
+
+```bash
   cd openpi
 
   uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_npm_lora --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm_lora/sweep2E/2999
 
-  ```
+```
 
 2. **Terminal 2**: Launch robot control system
-   
-  ```bash
+
+```bash
   cd <piper_ros>
 
   source devel/setup.bash
@@ -337,7 +340,7 @@ uv run scripts/piper_pi05_main.py
   camera_left_usb_port:=2-1 \
   camera_right_usb_port:=2-8 \
   camera_top_usb_port:=2-2
-   ```
+```
 
 1. Terminal 3: Run VLA policy controller
 
@@ -347,16 +350,131 @@ uv run scripts/piper_pi05_main.py
   export ROS_MASTER_URI=http://localhost:11311
   
   uv run scripts/piper_pi05_main.py
-  ```
-
+```
 
 ## Troubleshooting
 
-### libgthread-2.0.so.0 not found
+### Missing Library: libgthread-2.0.so.0
 
-If you encounter the error `libgthread-2.0.so.0: cannot open shared object file`, install the missing library:
+**Error:**
+```
+libgthread-2.0.so.0: cannot open shared object file: No such file or directory
+```
 
+**Solution:**
 ```bash
 sudo apt-get update
 sudo apt-get install -y libglib2.0-0
+```
+
+### TorchCodec FFmpeg Compatibility Issues
+
+**Error:**
+```
+RuntimeError: Could not load libtorchcodec. Likely causes:
+  1. FFmpeg is not properly installed in your environment
+  2. PyTorch version is not compatible with TorchCodec
+  3. FFmpeg libraries not found (libavutil.so.*)
+```
+
+**Solution:**
+
+Switch to an alternative video backend instead of TorchCodec:
+
+```bash
+# Option 1: Use torchvision backend
+export LEROBOT_VIDEO_BACKEND=torchvision
+
+# Option 2: Use pyav backend
+export LEROBOT_VIDEO_BACKEND=pyav
+```
+
+Add this export to your shell profile for persistence:
+
+```bash
+# For bash
+echo 'export LEROBOT_VIDEO_BACKEND=torchvision' >> ~/.bashrc
+source ~/.bashrc
+
+# For zsh
+echo 'export LEROBOT_VIDEO_BACKEND=torchvision' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**Alternative:** Replace the video_utils.py file as described in the [Configuration](#configuration) section.
+
+### LeRobot Dataset Version Compatibility
+
+**Error:**
+```
+BackwardCompatibilityError: The dataset you requested is in 2.1 format.
+We introduced a new format since v3.0 which is not backward compatible with v2.1.
+```
+
+**Solution:**
+
+1. **Clear Hugging Face cache** (backup important files first):
+
+```bash
+# Check cache location
+ls ~/.cache/huggingface/
+
+# Remove dataset cache (be careful!)
+rm -rf ~/.cache/huggingface/hub/datasets--<your-dataset-name>
+```
+
+2. **Convert dataset from v2.1 to v3.0**:
+
+```bash
+python utils/convert_dataset_v21_to_v30.py \
+    --src-repo-id=your-username/dataset-name \
+    --dst-repo-id=your-username/dataset-name-v3
+```
+
+**Note:** This conversion process will:
+- Download the v2.1 dataset
+- Convert data and video formats
+- Generate proper metadata
+- Push the converted v3.0 dataset to Hugging Face Hub
+
+### Network and SSL Issues
+
+**Error 1: SSL Connection Error**
+```
+SSLError: EOF occurred in violation of protocol
+```
+
+**Solution:**
+
+Don't use VSCode Remote SSH for downloading large files. Use a direct shell connection instead:
+
+```bash
+# SSH directly into the machine
+ssh user@hostname
+
+# Then run your download/training commands
+cd NPM-VLA/openpi
+uv run scripts/train.py ...
+```
+
+### ROS Connection Issues
+
+**Error:**
+```
+Unable to register with master node
+```
+
+**Solution:**
+
+Ensure ROS_MASTER_URI is properly set:
+
+```bash
+# Check current setting
+echo $ROS_MASTER_URI
+
+# Set to localhost
+export ROS_MASTER_URI=http://localhost:11311
+
+# Verify connection
+rostopic list
 ```
