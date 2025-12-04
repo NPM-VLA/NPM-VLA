@@ -7,7 +7,7 @@ from multiprocessing import Pool, Manager, Lock
 from functools import partial
 
 from rosbags.highlevel import AnyReader
-from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME, LeRobotDataset
+from lerobot.datasets.lerobot_dataset import HF_LEROBOT_HOME, LeRobotDataset
 from huggingface_hub import hf_hub_download, list_repo_files
 
 REPO_NAME = "zeno/sweep2E_v1"

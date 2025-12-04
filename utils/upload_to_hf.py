@@ -4,10 +4,15 @@ Script to upload trained checkpoint directory to Hugging Face Hub.
 
 Typical usage (uploading a DiffusionPolicy / ACT pretrained_model folder):
 
-    python upload_ckpt_to_hf.py \
-        --repo_id Anlorla/pass_cucumber\
-        --ckpt_dir ../openpi/checkpoints/pi05_npm_lora/pass_cucumber/ \
+    python upload_to_hf.py \
+        --repo_id Anlorla/push_block_pi05\
+        --ckpt_dir /home/jovyan/workspace/openpi/checkpoints/pi05_npm_lora/push_block/9999/ \
         --repo_type model 
+
+      python utils/upload_to_hf.py \
+      --repo_id Anlorla/push_block_lerobot21 \
+      --ckpt_dir ~/.cache/huggingface/lerobot/zeno/push_block\
+      --repo_type dataset 
 
 Notes:
 - Run `huggingface-cli login` first, or provide --token in the command.

@@ -352,16 +352,131 @@ uv run scripts/piper_pi05_main.py
   uv run scripts/piper_pi05_main.py
 ```
 
+### Alternative: Diffusion Policy (IL Method)
+
+If using Imitation Learning methods like Diffusion Policy instead of VLA, we only need to set up 2 terminals (no policy server needed).
+
+#### Prerequisites
+
+- Trained Diffusion Policy checkpoint (see training section below)
+- LeRobot environment with diffusion policy support
+- ROS environment properly configured
+
+#### Training Diffusion Policy
+
+1. **Activate LeRobot environment**:
+
+```bash
+conda activate lerobot
+```
+
+2. **Train the policy**:
+
+```bash
+cd IL_policies
+
+# Train diffusion policy 
+python train_diffusion_policy.py \
+  --dataset-repo-id "Anlorla/sweep2E_lerobot30" \
+  --output-dir "./checkpoints/sweep2E_dp" \
+  --num-epochs 3000 \
+  --batch-size 64 \
+  --learning-rate 1e-4 \
+  --horizon 16 \
+  --n-action-steps 8
+```
+
+**Training Parameters**:
+- `--dataset-repo-id`: Hugging Face dataset repository ID
+- `--output-dir`: Directory to save checkpoints
+- `--num-epochs`: Number of training epochs
+- `--batch-size`: Training batch size
+- `--horizon`: Prediction horizon (number of future steps)
+- `--n-action-steps`: Number of action steps to execute per prediction
+
+
+3. **Evaluate offline** (optional):
+
+```bash
+# Run offline evaluation to check prediction accuracy
+python eval_dp_offline.py \
+  --checkpoint-dir "./checkpoints/sweep2E_dp/checkpoints/040000/pretrained_model" \
+  --dataset-repo-id "Anlorla/sweep2E_lerobot30" \
+  --num-samples 3200
+```
+
+See `Debug.md` for detailed offline evaluation metrics and analysis.
+
+#### Deployment with Diffusion Policy
+
+**Terminal 1**: Launch ROS control node
+
+```bash
+cd <piper_ros_workspace>
+source devel/setup.bash
+export ROS_MASTER_URI=http://localhost:11311
+
+# Remember to setup CAN ports before roslaunch
+roslaunch piper_bridge start_robot_all.launch \
+  ranger_can_port:=can0 \
+  left_can_port:=can_left \
+  right_can_port:=can_right \
+  enable_ranger:=false \
+  enable_paddle2ranger:=false \
+  enable_dual_arm:=true \
+  enable_cameras:=true \
+  enable_rviz:=true \
+  camera_left_usb_port:=2-1 \
+  camera_right_usb_port:=2-8 \
+  camera_top_usb_port:=2-2
+```
+
+**Terminal 2**: Run Diffusion Policy controller
+
+```bash
+conda activate lerobot
+export ROS_MASTER_URI=http://localhost:11311
+
+cd IL_policies
+python piper_dp_main.py
+```
+
+**Script Configuration** (`piper_dp_main.py`):
+
+Edit the checkpoint path in the script:
+
+```python
+# Line ~211 in piper_dp_main.py
+ckpt_dir = "/home/jovyan/workspace/IL_policies/checkpoints/sweep2E_dp/checkpoints/040000/pretrained_model"
+```
+
+**Control Parameters** (adjustable in `piper_dp_main.py`):
+
+```python
+# Control frequency
+rate = rospy.Rate(10)  # 10 Hz (start with 0.5 Hz for initial testing)
+
+# Safety clipping
+MAX_JOINT_DELTA = 0.15  # Maximum joint change per step (radians)
+ENABLE_ACTION_CLIPPING = True
+
+# EMA smoothing
+ENABLE_SMOOTHING = True
+SMOOTHING_ALPHA = 0.3  # Lower = smoother but slower response
+```
+
 ## Troubleshooting
 
 ### Missing Library: libgthread-2.0.so.0
 
 **Error:**
+
 ```
 libgthread-2.0.so.0: cannot open shared object file: No such file or directory
 ```
 
 **Solution:**
+
 ```bash
 sudo apt-get update
 sudo apt-get install -y libglib2.0-0
@@ -370,6 +485,7 @@ sudo apt-get install -y libglib2.0-0
 ### TorchCodec FFmpeg Compatibility Issues
 
 **Error:**
+
 ```
 RuntimeError: Could not load libtorchcodec. Likely causes:
   1. FFmpeg is not properly installed in your environment
@@ -406,6 +522,7 @@ source ~/.zshrc
 ### LeRobot Dataset Version Compatibility
 
 **Error:**
+
 ```
 BackwardCompatibilityError: The dataset you requested is in 2.1 format.
 We introduced a new format since v3.0 which is not backward compatible with v2.1.
@@ -432,6 +549,7 @@ python utils/convert_dataset_v21_to_v30.py \
 ```
 
 **Note:** This conversion process will:
+
 - Download the v2.1 dataset
 - Convert data and video formats
 - Generate proper metadata
@@ -440,6 +558,7 @@ python utils/convert_dataset_v21_to_v30.py \
 ### Network and SSL Issues
 
 **Error 1: SSL Connection Error**
+
 ```
 SSLError: EOF occurred in violation of protocol
 ```
@@ -460,6 +579,7 @@ uv run scripts/train.py ...
 ### ROS Connection Issues
 
 **Error:**
+
 ```
 Unable to register with master node
 ```
@@ -478,3 +598,10 @@ export ROS_MASTER_URI=http://localhost:11311
 # Verify connection
 rostopic list
 ```
+
+unable to enable robot arm:
+
+1. recharge arms
+2. plug out can
+3. re launch
+4. when record, teleop arms using 示教
