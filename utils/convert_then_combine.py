@@ -10,7 +10,7 @@ from rosbags.highlevel import AnyReader
 from lerobot.datasets.lerobot_dataset import HF_LEROBOT_HOME, LeRobotDataset
 from huggingface_hub import hf_hub_download, list_repo_files
 
-REPO_NAME = "zeno/sweep2E_v1"
+REPO_NAME = "zeno/push_block_dual"
 
 # ============================================================
 # DATA SOURCE CONFIGURATION
@@ -20,14 +20,20 @@ REPO_NAME = "zeno/sweep2E_v1"
 DATA_SOURCE = "huggingface"  # or "local"
 
 # Local data directory (used when DATA_SOURCE="local")
-DATA_ROOT = Path("/home/jovyan/workspace/openpi/npm_sweep2E_data")
+DATA_ROOT = Path("/home/jovyan/workspace/openpi/push_block_dual_data")
 
-# Hugging Face dataset repository (used when DATA_SOURCE="huggingface")
-HF_DATASET_REPO = "Anlorla/sweep2E"
+
+HF_DATASET_REPOS = [
+    "Anlorla/push_block_dual",
+    "Anlorla/push_block_dual1",
+    "Anlorla/push_block_dual2",
+    "Anlorla/push_block_dual3",
+]
+
 
 # List of task names to process (each task folder contains multiple .bag files)
 TASK_NAMES = [
-    "Push the block to the right and then move both arms back to the home pose.",
+    "Move the block to the cross position and then move arms back to the home pose.",
 ]
 
 # ROS topics
@@ -87,47 +93,47 @@ def collect_bag_files_local(task_name):
 
 
 def collect_bag_files_huggingface(task_name):
-    """Collect all .bag files from Hugging Face dataset repository."""
-    print(f"Fetching file list from Hugging Face: {HF_DATASET_REPO}")
+    """Collect all .bag files from Hugging Face dataset repositories."""
+    all_bag_paths = []
 
-    try:
-        all_files = list_repo_files(repo_id=HF_DATASET_REPO, repo_type="dataset")
+    for repo in HF_DATASET_REPOS:
+        print(f"\nFetching file list from Hugging Face repo: {repo}")
 
-        # Filter for .bag files for this task
-        bag_filenames = [f for f in all_files if f.endswith(".bag")]
-        bag_filenames = sorted(bag_filenames)
+        try:
+            repo_files = list_repo_files(repo_id=repo, repo_type="dataset")
+            bag_filenames = [f for f in repo_files if f.endswith(".bag")]
+            bag_filenames = sorted(bag_filenames)
 
-        if not bag_filenames:
-            print(
-                f"Warning: No .bag files found for task '{task_name}' in {HF_DATASET_REPO}"
-            )
-            return []
+            if not bag_filenames:
+                print(f"  Warning: No .bag files found in {repo}")
+                continue
 
-        print(f"Found {len(bag_filenames)} bag file(s) for task '{task_name}':")
-        for filename in bag_filenames:
-            print(f"  - {filename}")
+            print(f"  Found {len(bag_filenames)} bag file(s) in {repo}:")
+            for filename in bag_filenames:
+                print(f"    - {filename}")
 
-        print("\nDownloading/caching files from Hugging Face...")
-        bag_paths = []
-        for filename in bag_filenames:
-            print(f"  Fetching: {filename}")
-            local_path = hf_hub_download(
-                repo_id=HF_DATASET_REPO,
-                filename=filename,
-                repo_type="dataset",
-            )
-            bag_paths.append(Path(local_path))
-            file_size_mb = Path(local_path).stat().st_size / (1024 * 1024)
-            print(f"    -> Cached at: {local_path} ({file_size_mb:.2f} MB)")
+            print("  Downloading/caching files from Hugging Face...")
+            for filename in bag_filenames:
+                print(f"    Fetching: {filename}")
+                local_path = hf_hub_download(
+                    repo_id=repo,
+                    filename=filename,
+                    repo_type="dataset",
+                )
+                local_path = Path(local_path)
+                all_bag_paths.append(local_path)
+                file_size_mb = local_path.stat().st_size / (1024 * 1024)
+                print(f"      -> Cached at: {local_path} ({file_size_mb:.2f} MB)")
 
-        return bag_paths
+        except Exception as e:
+            print(f"Error fetching files from Hugging Face repo {repo}: {e}")
+            import traceback
 
-    except Exception as e:
-        print(f"Error fetching files from Hugging Face: {e}")
-        import traceback
+            traceback.print_exc()
+            continue
 
-        traceback.print_exc()
-        return []
+    print(f"\nTotal .bag files collected from all repos: {len(all_bag_paths)}")
+    return all_bag_paths
 
 
 def collect_bag_files(task_name):

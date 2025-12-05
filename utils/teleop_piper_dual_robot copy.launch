@@ -1,0 +1,26 @@
+<launch>
+  <arg name="left_can_port" default="can_left" />
+  <arg name="right_can_port" default="can_right" />
+  <arg name="robot_prefix_left" default="/robot/arm_left/" />
+  <arg name="robot_prefix_right" default="/robot/arm_right/" />
+  <arg name="teleop_prefix_left" default="/teleop/arm_left/" />
+  <arg name="teleop_prefix_right" default="/teleop/arm_right/" />
+
+  <!-- Left arm node -->
+  <node name="piper_ctrl_left_node" pkg="piper_ctrl" type="piper_ctrl_node.py" output="screen">
+    <rosparam file="$(find piper_ctrl)/config/piper_ctrl_mit.yaml" command="load"/>
+    <param name="can_port" value="$(arg left_can_port)"/>
+    <param name="topic_prefix" value="$(arg robot_prefix_left)"/>
+    <remap from="$(arg robot_prefix_left)joint_pos_cmd" to="$(arg teleop_prefix_left)joint_states_single"/>
+    <remap from="$(arg robot_prefix_left)gripper_pos_cmd" to="$(arg teleop_prefix_left)joint_states_single"/>
+  </node>
+  
+  <!-- Right arm node -->
+  <node name="piper_ctrl_right_node" pkg="piper_ctrl" type="piper_ctrl_node.py" output="screen">
+    <rosparam file="$(find piper_ctrl)/config/piper_ctrl_mit.yaml" command="load"/>
+    <param name="can_port" value="$(arg right_can_port)"/>
+    <param name="topic_prefix" value="$(arg robot_prefix_right)"/>
+    <remap from="$(arg robot_prefix_right)joint_pos_cmd" to="$(arg teleop_prefix_right)joint_states_single"/>
+    <remap from="$(arg robot_prefix_right)gripper_pos_cmd" to="$(arg teleop_prefix_right)joint_states_single"/>
+  </node>
+</launch>

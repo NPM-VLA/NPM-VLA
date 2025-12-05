@@ -122,6 +122,14 @@ After conversion, the LeRobot dataset will be organized as follows:
 - Video resolution: 256×256×3 RGB @ 10 FPS
 - Format: Parquet files for tabular data, MP4 for videos
 
+Note:
+Remember to update below settings when preparing data:
+`utils\convert_bag2lerobot21_dualarm.py`
+
+1. REPO_NAME # local hf dir to store data
+2. HF_DATASET_REPO # remote repo
+3. TASK_NAMES
+
 ## Training
 
 ### 1. Compute Normalization Statistics
@@ -130,14 +138,14 @@ Before training, compute the normalization statistics for your dataset:
 
 ```bash
 cd openpi
-uv run python scripts/compute_norm_stats.py --config-name pi05_npm
+uv run python scripts/compute_norm_stats.py --config-name pi05_npm_lora
 ```
 
 ### 2. Start Training
 
 ```bash
 cd openpi
-XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_npm_lora --exp-name=sweep2E --overwrite
+XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_npm_lora --exp-name=push_block_dual --overwrite
 ```
 
 **Parameters:**
@@ -146,6 +154,13 @@ XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_npm_lora --exp-n
 - `pi05_npm_lora`: Training configuration name
 - `--exp-name`: Experiment name for logging
 - `--overwrite`: Overwrite existing experiment data
+
+Note:
+Remember to update below settings when finetuing:
+`src\openpi\training\config.py`
+
+1. repo_id: same as REPO_NAME
+2. some params will infect the training process, like lr_schedule and so on.
 
 ## Inference
 
@@ -159,8 +174,7 @@ Navigate to the OpenPI directory and run the policy server:
 cd openpi
 uv run scripts/serve_policy.py policy:checkpoint \
   --policy.config=pi05_npm_lora \
-  --policy.dir=/path/to/checkpoint/directory \
-  --default_prompt="your task description"
+  --policy.dir=/path/to/checkpoint/directory
 ```
 
 **Example:**
@@ -168,8 +182,7 @@ uv run scripts/serve_policy.py policy:checkpoint \
 ```bash
 uv run scripts/serve_policy.py policy:checkpoint \
   --policy.config=pi05_npm_lora \
-  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm_lora/sweep2E/2999 \
-  --default_prompt="sweep the blocks into an E shape"
+  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm_lora/push_block_pi05
 ```
 
 **Parameters:**
@@ -315,7 +328,7 @@ uv run scripts/piper_pi05_main.py
 ```bash
   cd openpi
 
-  uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_npm_lora --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm_lora/sweep2E/2999
+  uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_npm_lora --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm_lora/push_block_pi05_new/
 
 ```
 
@@ -387,13 +400,13 @@ python train_diffusion_policy.py \
 ```
 
 **Training Parameters**:
+
 - `--dataset-repo-id`: Hugging Face dataset repository ID
 - `--output-dir`: Directory to save checkpoints
 - `--num-epochs`: Number of training epochs
 - `--batch-size`: Training batch size
 - `--horizon`: Prediction horizon (number of future steps)
 - `--n-action-steps`: Number of action steps to execute per prediction
-
 
 3. **Evaluate offline** (optional):
 
@@ -601,7 +614,17 @@ rostopic list
 
 unable to enable robot arm:
 
-1. recharge arms
-2. plug out can
-3. re launch
-4. when record, teleop arms using 示教
+1. restart workstation-	4
+2. recharge arms
+3. plug out can
+4. re launch
+5. when record, teleop arms using 示教
+
+launch config file:
+ssh slave:　code /home/zeno/piper_ros/src/zeno-wholebody-teleop/common/piper_ctrl/launch/piper_dual_robot.launch
+
+ros_bridge
+
+硬件：
+
+不要上电拔插，先插上再上电，先断电再拔掉。
