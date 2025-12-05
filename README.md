@@ -612,19 +612,28 @@ export ROS_MASTER_URI=http://localhost:11311
 rostopic list
 ```
 
-unable to enable robot arm:
+### Unable to Enable Robot Arms
 
-1. restart workstation-	4
-2. recharge arms
-3. plug out can
-4. re launch
-5. when record, teleop arms using 示教
+If the robot arms fail to enable, try the following steps:
 
-launch config file:
-ssh slave:　code /home/zeno/piper_ros/src/zeno-wholebody-teleop/common/piper_ctrl/launch/piper_dual_robot.launch
+Always power off **before** unplugging cables
+Always plug in cables **before** powering on
 
-ros_bridge
+1. Power off arms 
+2. Unplug the CAN cables
+3. Recharge the robot arms
+4. Re-launch the system
 
-硬件：
+### Configuration File Locations
 
-不要上电拔插，先插上再上电，先断电再拔掉。
+Launch configuration file:
+```bash
+# SSH into slave machine and edit the launch file
+ssh slave
+code /home/zeno/piper_ros/src/zeno-wholebody-teleop/common/piper_ctrl/launch/piper_dual_robot.launch
+```
+
+### ROS launch file
+For the latest version of launch file of this program, refer to:
+https://github.com/Jeong-zju/zeno-wholebody-teleop/tree/master
+
