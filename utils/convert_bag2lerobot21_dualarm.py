@@ -36,8 +36,8 @@ CAM_WRIST_LEFT = "/realsense_left/color/image_raw/compressed"
 CAM_WRIST_RIGHT = "/realsense_right/color/image_raw/compressed"
 STATE_LEFT = "/robot/arm_left/joint_states_single"
 STATE_RIGHT = "/robot/arm_right/joint_states_single"
-ACTION_LEFT = "/teleop/arm_left/joint_states_single"
-ACTION_RIGHT = "/teleop/arm_right/joint_states_single"
+ACTION_LEFT = "/robot/arm_left/joint_states_single"
+ACTION_RIGHT = "/robot/arm_right/joint_states_single"
 
 # ============================================================
 # CONVERSION SETTINGS

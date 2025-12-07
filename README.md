@@ -182,7 +182,7 @@ uv run scripts/serve_policy.py policy:checkpoint \
 ```bash
 uv run scripts/serve_policy.py policy:checkpoint \
   --policy.config=pi05_npm_lora \
-  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm_lora/push_block_pi05
+  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm_lora/push_block_dual
 ```
 
 **Parameters:**
@@ -198,22 +198,41 @@ uv run scripts/serve_policy.py policy:checkpoint \
 - The policy server will initialize the model and wait for observation inputs
 - Make sure the configuration name matches the one used during training
 
-## Deployment
+## Deployment Workflow
 
 This section covers deploying the trained policy on real robot hardware. The deployment process involves setting up the robot control system and connecting it with the trained VLA policy.
 
 ### Prerequisites
 
 - Trained policy checkpoint (see [Training](#training) and [Inference](#inference) sections)
-- Policy server running (see [Inference](#inference) section)
+- Policy server running (see [Inference](#inference) section, remember to modify `src\openpi\training\config.py`)
 - Robot hardware setup (refer to [zeno-wholebody-teleop](https://github.com/Jeong-zju/zeno-wholebody-teleop))
 - ROS environment properly configured
+
+### 0. Start Policy Server
+
+Start the policy server before configuring and launching the robot system:
+
+```bash
+cd openpi
+uv run scripts/serve_policy.py policy:checkpoint \
+  --policy.config=pi0_npm_lora \
+  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi0_npm_lora/push_block
+```
+
+See the [Inference](#inference) section for more details on policy server configuration.
 
 ### 1. Configure Launch Files
 
 Before starting the robot, modify the ROS launch files to redirect control commands from teleoperation to VLA policy output.
 
 **Edit `piper_dual_robot.launch`:**
+
+SSH into slave machine and edit the launch file:
+
+```ssh
+code /home/zeno/piper_ros/src/zeno-wholebody-teleop/common/piper_ctrl/launch/piper_dual_robot.launch
+```
 
 Comment out the teleoperation command mapping and add VLA command mapping:
 
@@ -227,6 +246,8 @@ Comment out the teleoperation command mapping and add VLA command mapping:
 <remap from="$(arg robot_prefix_right)joint_pos_cmd" to="$(arg robot_prefix_right)vla_pos_cmd"/>
 ```
 
+**or directly copy the launch file  `utils\deploy_piper_dual_robot.launch `and paste .
+
 **Why this change?**
 
 This remapping redirects the joint position commands from teleoperation topics to VLA policy output topics, allowing the trained model to control the robot instead of manual teleoperation.
@@ -239,19 +260,13 @@ Source the ROS workspace and launch the robot control nodes:
 # Source the workspace
 source devel/setup.bash
 
+bash can_activate.sh can_left 1000000 "1-8.3:1.0"
+bash can_activate.sh can_right 1000000 "1-8.4:1.0"
+
+export ROS_MASTER_URI=http://localhost:11311
+
 # Launch the robot with all sensors
-roslaunch piper_bridge start_robot_all.launch \
-  ranger_can_port:=can0 \
-  left_can_port:=can_left \
-  right_can_port:=can_right \
-  enable_ranger:=false \
-  enable_paddle2ranger:=false \
-  enable_dual_arm:=true \
-  enable_cameras:=true \
-  enable_rviz:=true \
-  camera_left_usb_port:=2-1 \
-  camera_right_usb_port:=2-8 \
-  camera_top_usb_port:=2-2
+roslaunch robot_setup start_robot_all.launch ranger_can_port:=can0 left_can_port:=can_left right_can_port:=can_right enable_ranger:=false enable_paddle2ranger:=false enable_dual_arm:=true enable_cameras:=true enable_rviz:=true enable_gravity_compensation:=false camera_left_usb_port:=2-1 camera_right_usb_port:=2-8 camera_top_usb_port:=2-2
 ```
 
 **Parameters:**
@@ -321,51 +336,7 @@ uv run scripts/piper_pi05_main.py
                                                        └─────────────────┘
 ```
 
-### Deployment Workflow
-
-1. **Terminal 1**: Start the policy server (Inference)
-
-```bash
-  cd openpi
-
-  uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_npm_lora --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm_lora/push_block_pi05_new/
-
-```
-
-2. **Terminal 2**: Launch robot control system
-
-```bash
-  cd <piper_ros>
-
-  source devel/setup.bash
-
-  export ROS_MASTER_URI=http://localhost:11311
-  # remember to setup the port before roslaunch
-  roslaunch piper_bridge start_robot_all.launch \
-  ranger_can_port:=can0 \
-  left_can_port:=can_left \
-  right_can_port:=can_right \
-  enable_ranger:=false \
-  enable_paddle2ranger:=false \
-  enable_dual_arm:=true \
-  enable_cameras:=true \
-  enable_rviz:=true \
-  camera_left_usb_port:=2-1 \
-  camera_right_usb_port:=2-8 \
-  camera_top_usb_port:=2-2
-```
-
-1. Terminal 3: Run VLA policy controller
-
-```bash
-  source .venv/bin/activate
-
-  export ROS_MASTER_URI=http://localhost:11311
-  
-  uv run scripts/piper_pi05_main.py
-```
-
-### Alternative: Diffusion Policy (IL Method)
+## Alternative: Diffusion Policy (IL Method)
 
 If using Imitation Learning methods like Diffusion Policy instead of VLA, we only need to set up 2 terminals (no policy server needed).
 
@@ -619,21 +590,12 @@ If the robot arms fail to enable, try the following steps:
 Always power off **before** unplugging cables
 Always plug in cables **before** powering on
 
-1. Power off arms 
+1. Power off arms
 2. Unplug the CAN cables
 3. Recharge the robot arms
 4. Re-launch the system
 
-### Configuration File Locations
-
-Launch configuration file:
-```bash
-# SSH into slave machine and edit the launch file
-ssh slave
-code /home/zeno/piper_ros/src/zeno-wholebody-teleop/common/piper_ctrl/launch/piper_dual_robot.launch
-```
-
 ### ROS launch file
+
 For the latest version of launch file of this program, refer to:
 https://github.com/Jeong-zju/zeno-wholebody-teleop/tree/master
-
