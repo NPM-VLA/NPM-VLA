@@ -6,19 +6,15 @@ import draccus
 import numpy as np
 import rospy
 from sensor_msgs.msg import CompressedImage, JointState
-
-# from cv_bridge import CvBridge
 import cv2
-
 import torch
 
-# Import your local lerobot (the one you trained with)
-from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
-from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+from lerobot.policies.act.configuration_act import ACTConfig
+from lerobot.policies.act.modeling_act import ACTPolicy
 
 
 # ----------------- Global buffers -----------------
-# bridge = CvBridge()
+
 def decode_compressed_image(msg: CompressedImage) -> np.ndarray:
     """
     Decode a ROS CompressedImage message to a BGR uint8 OpenCV image.
@@ -62,42 +58,40 @@ def cb_wrist_r(msg: CompressedImage):
 
 
 # ----------------- Joint callbacks -----------------
-def cb_joints_left(msg):
+def cb_joints_left(msg: JointState):
     latest_q["left"] = np.array(msg.position, dtype=np.float32)
     rospy.logdebug(f"Received left arm joint states: {latest_q['left'][:3]}...")
 
 
-def cb_joints_right(msg):
+def cb_joints_right(msg: JointState):
     latest_q["right"] = np.array(msg.position, dtype=np.float32)
     rospy.logdebug(f"Received right arm joint states: {latest_q['right'][:3]}...")
 
 
 # ----------------- Utility: image -> torch tensor -----------------
-def preprocess_image(img_bgr):
+def preprocess_image(img_bgr: np.ndarray) -> torch.Tensor:
     """
     Convert BGR uint8 (H,W,3) to float32 torch tensor (1,3,256,256) in [0,1].
     """
-    import cv2
-
     img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     img = cv2.resize(img, (256, 256), interpolation=cv2.INTER_AREA)
     img = img.astype(np.float32) / 255.0  # [H,W,3]
-    img = np.transpose(img, (2, 0, 1))  # [3,H,W]
-    img = np.expand_dims(img, 0)  # [1,3,H,W]
+    img = np.transpose(img, (2, 0, 1))    # [3,H,W]
+    img = np.expand_dims(img, 0)          # [1,3,H,W]
     return torch.from_numpy(img)
 
 
-# ----------------- Load policy -----------------
-def load_policy(ckpt_dir: str, device: str):
+# ----------------- Load ACT policy -----------------
+def load_policy(ckpt_dir: str, device: str) -> ACTPolicy:
     """
-    Load a DiffusionPolicy either from a local checkpoint directory
+    Load an ACTPolicy either from a local checkpoint directory
     (e.g. .../checkpoints/040000/pretrained_model) or from a HF repo id.
 
     - If `ckpt_dir` is an existing directory -> load from local files.
     - Otherwise -> treat `ckpt_dir` as HF repo_id and call from_pretrained.
     """
     ckpt_path = Path(ckpt_dir).expanduser().resolve()
-    rospy.loginfo(f"Loading Diffusion Policy from: {ckpt_path}")
+    rospy.loginfo(f"Loading ACT Policy from: {ckpt_path}")
 
     # ===== Case 1: local directory checkpoint =====
     if ckpt_path.is_dir():
@@ -117,15 +111,15 @@ def load_policy(ckpt_dir: str, device: str):
         # Use draccus.decode to convert dict to proper dataclass with nested structures
         from draccus.parsers import decoding
 
-        config = decoding.decode(DiffusionConfig, cfg_dict)
+        config = decoding.decode(ACTConfig, cfg_dict)
 
         # 3) Create empty policy and move to device
-        policy = DiffusionPolicy(config=config).to(device)
+        policy = ACTPolicy(config=config).to(device)
 
         # 4) Find a weight file inside the directory
         weight_path = None
         candidate_patterns = [
-            "diffusion_policy*.safetensors",  # very likely for DP
+            "model*.safetensors",
             "pytorch_model*.bin",
             "*.safetensors",
             "*.bin",
@@ -135,11 +129,11 @@ def load_policy(ckpt_dir: str, device: str):
         for pattern in candidate_patterns:
             matches = list(ckpt_path.glob(pattern))
             if matches:
-                # Prefer names that start with "diffusion_policy" or "pytorch_model"
+                # Prefer names that start with "model" or "pytorch_model"
                 matches.sort(
                     key=lambda p: (
                         not (
-                            p.name.startswith("diffusion_policy")
+                            p.name.startswith("model")
                             or p.name.startswith("pytorch_model")
                         ),
                         p.name,
@@ -189,8 +183,8 @@ def load_policy(ckpt_dir: str, device: str):
 
     # ===== Case 2: not a local dir → treat as HF repo id =====
     rospy.loginfo("  → Path does not exist locally, assuming Hugging Face repo id.")
-    policy = DiffusionPolicy.from_pretrained(
-        pretrained_model_name_or_path=ckpt_dir,
+    policy = ACTPolicy.from_pretrained(
+        pretrained_name_or_path=ckpt_dir,
         device=device,
     )
     policy.eval()
@@ -198,19 +192,20 @@ def load_policy(ckpt_dir: str, device: str):
 
 
 def main():
-    rospy.init_node("piper_dp_main")
+    rospy.init_node("piper_act_main")
 
     # ----------------- Load policy -----------------
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # You can either:
     # 1) load from local checkpoint dir,
-    # 2) or from HF repo id (e.g. "Anlorla/sweep2E_dp").
+    # 2) or from HF repo id (e.g. "Anlorla/sweep2E_act").
     #
-    # Here assume local checkpoint, same path as eval:
-    ckpt_dir = "/home/jovyan/workspace/IL_policies/checkpoints/sweep2E_dp/checkpoints/040000/pretrained_model"
+    # Update this path to your actual checkpoint:
+    ckpt_dir = "/home/zeno/NPM-VLA-Project/NPM-VLA/IL_policies/checkpoints/push_block_act"
 
     policy = load_policy(ckpt_dir, device)
+    policy.reset()  # Reset the action queue for ACT policy
 
     # ----------------- ROS subs / pubs -----------------
     rospy.Subscriber(
@@ -233,7 +228,10 @@ def main():
     )
 
     rospy.Subscriber(
-        "/robot/arm_left/joint_states_single", JointState, cb_joints_left, queue_size=1
+        "/robot/arm_left/joint_states_single",
+        JointState,
+        cb_joints_left,
+        queue_size=1,
     )
     rospy.Subscriber(
         "/robot/arm_right/joint_states_single",
@@ -242,9 +240,9 @@ def main():
         queue_size=1,
     )
 
-    pub_left = rospy.Publisher("/robot/arm_left/vla_pos_cmd", JointState, queue_size=1)
+    pub_left = rospy.Publisher("/robot/arm_right/vla_joint_cmd", JointState, queue_size=1)
     pub_right = rospy.Publisher(
-        "/robot/arm_right/vla_pos_cmd", JointState, queue_size=1
+        "/robot/arm_left/vla_joint_cmd", JointState, queue_size=1
     )
 
     rospy.loginfo("Robot arm command publishers initialized")
@@ -252,7 +250,7 @@ def main():
     # ----------------- Control parameters -----------------
     # SAFETY: Start with moderate frequency (10 Hz) for testing
     # For initial testing on new robot, consider starting with 0.5 Hz (rate = rospy.Rate(0.5))
-    rate = rospy.Rate(10)  # Control frequency in Hz
+    rate = rospy.Rate(20)  # Control frequency in Hz
 
     # Safety parameters
     MAX_JOINT_DELTA = 0.15  # Maximum joint position change per step (radians)
@@ -283,13 +281,13 @@ def main():
             data_ready_logged = True
 
         # --------------- Build observation dict for policy ---------------
-        main_img = preprocess_image(latest_imgs["main"]).to(device)  # [1,3,256,256]
+        main_img = preprocess_image(latest_imgs["main"]).to(device)   # [1,3,256,256]
         wrist_l = preprocess_image(latest_imgs["wrist_l"]).to(device)
         wrist_r = preprocess_image(latest_imgs["wrist_r"]).to(device)
 
-        state_np = np.concatenate([latest_q["left"], latest_q["right"]], axis=0).astype(
-            np.float32
-        )
+        state_np = np.concatenate(
+            [latest_q["left"], latest_q["right"]], axis=0
+        ).astype(np.float32)
         state = torch.from_numpy(state_np[None, :]).to(device)  # [1,14]
 
         obs = {
@@ -300,46 +298,50 @@ def main():
             "observation.state": state,
         }
 
-        # --------------- Policy inference ---------------
-        rospy.logdebug("Sending observation to policy...")
-        with torch.no_grad():
-            out = policy.select_action(obs)  # [1,H,14] or [1,14]
+        # --------------- Policy inference (get multiple actions from queue) ---------------
+        # ACT manages an internal action queue, so we call select_action multiple times
+        # to get a chunk of actions to execute
+        rospy.logdebug("Requesting action chunk from ACT policy...")
+        actions = []
 
-        rospy.loginfo_throttle(5.0, "✓ Successfully communicated with policy")
+        for _ in range(num_actions_to_execute):
+            with torch.no_grad():
+                action_tensor = policy.select_action(obs)  # [1, 14] - single action
 
-        # Extract action chunk from policy output
-        if out.ndim == 3:
-            # Diffusion policy returns [1, horizon, action_dim]
-            actions = out[0, :, :].cpu().numpy()  # [H, 14]
-        else:
-            # Fallback for [1, 14] output
-            actions = out.cpu().numpy()  # [1, 14]
-            if actions.ndim == 1:
-                actions = actions[None, :]  # [1, 14]
+            # Extract action from batch dimension
+            action = action_tensor[0, :].cpu().numpy()  # [14]
 
+            if len(action) != 14:
+                rospy.logwarn(
+                    f"[SAFETY] Invalid action dimension: expected 14, got {len(action)}. Stopping chunk collection."
+                )
+                break
+
+            actions.append(action)
+
+        if len(actions) == 0:
+            rospy.logwarn("[SAFETY] No valid actions received, skipping this cycle.")
+            rate.sleep()
+            continue
+
+        actions = np.array(actions)  # [num_actions, 14]
         rospy.loginfo_throttle(5.0, f"✓ Successfully received action chunk, shape: {actions.shape}")
 
-        # Determine how many actions to execute (min of num_actions_to_execute and available actions)
-        num_to_exec = min(num_actions_to_execute, len(actions))
-        rospy.loginfo(f"Executing {num_to_exec} actions from predicted chunk of {len(actions)}")
+        num_to_exec = len(actions)
+        rospy.loginfo(f"Executing {num_to_exec} actions from ACT policy queue")
 
-        # Execute the first num_to_exec actions from the predicted chunk
+        # Execute the actions from the chunk
         for i in range(num_to_exec):
             if rospy.is_shutdown():
                 break
 
             action = actions[i]
 
-            # Validate action dimension
-            if len(action) != 14:
-                rospy.logwarn(
-                    f"[SAFETY] Invalid action dimension at index {i}: expected 14, got {len(action)}. Skipping this action."
-                )
-                continue
-
             # Split into left/right (14-dim total: 7 joints per arm)
             action_left = action[:7].copy()
             action_right = action[7:14].copy()
+            # Swap left/right to match hardware configuration
+            action_left, action_right = action_right, action_left
 
             # --------------- EMA smoothing ---------------
             global smoothed_action

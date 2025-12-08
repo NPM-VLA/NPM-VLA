@@ -130,6 +130,10 @@ Remember to update below settings when preparing data:
 2. HF_DATASET_REPO # remote repo
 3. TASK_NAMES
 
+### Dataset Download
+
+huggingface-cli download --resume-download Anlorla/push_block_dual_lerobot21 --local-dir  /workspace/.hf_home/hub/Anlorla/push_block_dual
+
 ## Training
 
 ### 1. Compute Normalization Statistics
@@ -138,14 +142,14 @@ Before training, compute the normalization statistics for your dataset:
 
 ```bash
 cd openpi
-uv run python scripts/compute_norm_stats.py --config-name pi05_npm_lora
+uv run python scripts/compute_norm_stats.py --config-name pi05_npm
 ```
 
 ### 2. Start Training
 
 ```bash
 cd openpi
-XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_npm_lora --exp-name=push_block_dual --overwrite
+XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_npm --exp-name=push_block_dual --overwrite
 ```
 
 **Parameters:**
@@ -216,8 +220,8 @@ Start the policy server before configuring and launching the robot system:
 ```bash
 cd openpi
 uv run scripts/serve_policy.py policy:checkpoint \
-  --policy.config=pi0_npm_lora \
-  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi0_npm_lora/push_block
+  --policy.config=pi05_npm\
+  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm/push_block_dual_full
 ```
 
 See the [Inference](#inference) section for more details on policy server configuration.
