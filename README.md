@@ -132,7 +132,15 @@ Remember to update below settings when preparing data:
 
 ### Dataset Download
 
-huggingface-cli download --resume-download Anlorla/push_block_dual_lerobot21 --local-dir  /workspace/.hf_home/hub/Anlorla/push_block_dual
+If there is no need to convert, we can directly download datasets as below:
+
+**On Saturn:**
+
+huggingface-cli download --resume-download Anlorla/push_block_dual_lerobot21 --local-dir  ~/workspace/.cache/huggingface/lerobot/Anlorla/push_block_dual --repo-type dataset
+
+**On Vast.ai:**
+
+huggingface-cli download --resume-download Anlorla/sweep2E_dualarm_v2 --local-dir  /workspace/.hf_home/lerobot/Anlorla/sweep2E_dualarm_v2 --repo-type dataset
 
 ## Training
 
@@ -220,8 +228,8 @@ Start the policy server before configuring and launching the robot system:
 ```bash
 cd openpi
 uv run scripts/serve_policy.py policy:checkpoint \
-  --policy.config=pi05_npm\
-  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm/push_block_dual_full
+  --policy.config=pi0_npm\
+  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi0_npm/pi0_sweep2E_dualarm_v1_primitives_200
 ```
 
 See the [Inference](#inference) section for more details on policy server configuration.
