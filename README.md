@@ -157,7 +157,7 @@ uv run python scripts/compute_norm_stats.py --config-name pi05_npm
 
 ```bash
 cd openpi
-XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_npm --exp-name=push_block_dual --overwrite
+XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_npm --exp-name=sweep2cross --overwrite
 ```
 
 **Parameters:**
@@ -228,8 +228,8 @@ Start the policy server before configuring and launching the robot system:
 ```bash
 cd openpi
 uv run scripts/serve_policy.py policy:checkpoint \
-  --policy.config=pi0_npm\
-  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi0_npm/pi0_sweep2E_dualarm_v1_primitives_200
+  --policy.config=pi05_npm\
+  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm/pi05_sweep2E_dualarm_v3.1
 ```
 
 See the [Inference](#inference) section for more details on policy server configuration.
@@ -611,3 +611,8 @@ Always plug in cables **before** powering on
 
 For the latest version of launch file of this program, refer to:
 https://github.com/Jeong-zju/zeno-wholebody-teleop/tree/master
+
+
+### Camara "No Image"
+
+After configuration, we need to source ~/.bashrc even if we don't modify anything.(Don't know why at present)

@@ -23,17 +23,11 @@ DATA_SOURCE = "huggingface"  # or "local"
 DATA_ROOT = Path("/home/jovyan/workspace/openpi/push_block_dual_data")
 
 
-HF_DATASET_REPOS = [
-    "Anlorla/push_block_dual",
-    "Anlorla/push_block_dual1",
-    "Anlorla/push_block_dual2",
-    "Anlorla/push_block_dual3",
-]
-
-
-# List of task names to process (each task folder contains multiple .bag files)
-TASK_NAMES = [
-    "Move the block to the cross position and then move arms back to the home pose.",
+# Mapping from Hugging Face repo to task name
+HF_DATASET_REPOS_WITH_TASKS = [
+    ("Anlorla/sweep2yellow", "Sweep lego blocks to yellow cross marker."),
+    ("Anlorla/sweep2red", "Sweep lego blocks to red cross marker."),
+    ("Anlorla/sweep2green", "Sweep lego blocks to green cross marker."),
 ]
 
 # ROS topics
@@ -92,12 +86,17 @@ def collect_bag_files_local(task_name):
     return bag_files
 
 
-def collect_bag_files_huggingface(task_name):
-    """Collect all .bag files from Hugging Face dataset repositories."""
-    all_bag_paths = []
+def collect_bag_files_huggingface():
+    """Collect all .bag files from Hugging Face dataset repositories with their task names.
 
-    for repo in HF_DATASET_REPOS:
+    Returns:
+        List of tuples: [(bag_path, task_name), ...]
+    """
+    all_bag_data = []  # List of (bag_path, task_name) tuples
+
+    for repo, task_name in HF_DATASET_REPOS_WITH_TASKS:
         print(f"\nFetching file list from Hugging Face repo: {repo}")
+        print(f"  Task: {task_name}")
 
         try:
             repo_files = list_repo_files(repo_id=repo, repo_type="dataset")
@@ -121,7 +120,7 @@ def collect_bag_files_huggingface(task_name):
                     repo_type="dataset",
                 )
                 local_path = Path(local_path)
-                all_bag_paths.append(local_path)
+                all_bag_data.append((local_path, task_name))
                 file_size_mb = local_path.stat().st_size / (1024 * 1024)
                 print(f"      -> Cached at: {local_path} ({file_size_mb:.2f} MB)")
 
@@ -132,16 +131,24 @@ def collect_bag_files_huggingface(task_name):
             traceback.print_exc()
             continue
 
-    print(f"\nTotal .bag files collected from all repos: {len(all_bag_paths)}")
-    return all_bag_paths
+    print(f"\nTotal .bag files collected from all repos: {len(all_bag_data)}")
+    return all_bag_data
 
 
-def collect_bag_files(task_name):
-    """Dispatch between local / Hugging Face data source."""
+def collect_bag_files(task_name=None):
+    """Dispatch between local / Hugging Face data source.
+
+    For huggingface source: Returns list of (bag_path, task_name) tuples
+    For local source: Returns list of bag_paths (task_name from parameter)
+    """
     if DATA_SOURCE == "huggingface":
-        return collect_bag_files_huggingface(task_name)
+        return collect_bag_files_huggingface()
     elif DATA_SOURCE == "local":
-        return collect_bag_files_local(task_name)
+        if task_name is None:
+            raise ValueError("task_name is required for local data source")
+        # Return as tuples for consistency
+        bag_paths = collect_bag_files_local(task_name)
+        return [(path, task_name) for path in bag_paths]
     else:
         raise ValueError(
             f"Unknown DATA_SOURCE: {DATA_SOURCE}. Must be 'local' or 'huggingface'"
@@ -453,17 +460,26 @@ if __name__ == "__main__":
         image_writer_processes=4,
     )
 
-    for task_name in TASK_NAMES:
-        print(f"\n{'=' * 60}")
-        print(f"Processing task: {task_name}")
-        print(f"{'=' * 60}")
+    # Collect all bag files with their corresponding task names
+    print(f"\n{'=' * 60}")
+    print("Collecting bag files from all repositories...")
+    print(f"{'=' * 60}")
 
-        bag_files = collect_bag_files(task_name)
-        total_bags = len(bag_files)
+    bag_data = collect_bag_files()  # Returns [(bag_path, task_name), ...]
+    total_bags = len(bag_data)
 
-        if total_bags == 0:
-            print("No bag files to process.")
-            continue
+    if total_bags == 0:
+        print("No bag files to process.")
+    else:
+        # Print summary by task
+        task_counts = {}
+        for bag_path, task_name in bag_data:
+            task_counts[task_name] = task_counts.get(task_name, 0) + 1
+
+        print(f"\nTotal bags to process: {total_bags}")
+        print("\nBreakdown by task:")
+        for task_name, count in task_counts.items():
+            print(f"  - {task_name}: {count} bags")
 
         # Create shared objects for multiprocessing
         manager = Manager()
@@ -471,14 +487,13 @@ if __name__ == "__main__":
         progress_dict["completed"] = 0
         lock = manager.Lock()
 
-        # Prepare arguments for each bag file
+        # Prepare arguments for each bag file with its corresponding task name
         bag_args = [
             (bag_path, task_name, bag_idx, total_bags, progress_dict, lock)
-            for bag_idx, bag_path in enumerate(bag_files, 1)
+            for bag_idx, (bag_path, task_name) in enumerate(bag_data, 1)
         ]
 
         print(f"\nStarting parallel processing with {NUM_WORKERS} workers...")
-        print(f"Total bags to process: {total_bags}")
 
         # Process bags in parallel
         with Pool(processes=NUM_WORKERS) as pool:
