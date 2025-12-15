@@ -53,13 +53,78 @@ utils/video_utils.py
 
 > **Why?** This modification resolves issues with torchvision and pyav video encoding/decoding in the LeRobot dataset pipeline.
 
+### Data Collection (Teleoperation)
+
+Before collecting data through teleoperation, ensure proper network configuration between the two machines.
+
+#### Prerequisites
+
+Configure network communication between master and slave machines by editing `/etc/hosts`:
+
+```bash
+sudo vim /etc/hosts
+```
+
+Add the IP addresses and hostnames of both machines:
+
+```
+# Example:
+192.168.4.161  zeno-teleop-master
+192.168.4.162  zeno-teleop
+```
+
+#### Recording Data
+
+Use the recording script `record.sh` to collect teleoperation data: 
+
+```bash
+bash record.sh
+```
+
+The recorded data will be saved in ROS bag format (`.bag` files).
+
+#### Format Conversion
+
+After recording, convert the bag files to the appropriate LeRobot format based on your training method:
+
+- **For OpenPI training**: Convert to LeRobot 2.1 format
+- **For ACT/Diffusion Policy training**: Convert to LeRobot 3.0 format
+
+See the [Data Conversion](#data-conversion) section below for detailed conversion instructions.
+
 ### Data Conversion
 
-Convert ROS bag files to LeRobot format:
+#### Convert ROS Bag to LeRobot 2.1 Format
+
+Convert ROS bag files to LeRobot 2.1 format for OpenPI training:
 
 ```bash
 python utils/convert_bag2lerobot21_dualarm.py
 ```
+
+Note: If there are multiple directories, use `utils\convert_then_combine.py` instead.
+
+#### Convert LeRobot 2.1 to 3.0 Format
+
+For ACT/Diffusion Policy training, convert LeRobot 2.1 datasets to 3.0 format:
+
+```bash
+python utils/convert_dataset_v21_to_v30.py \
+    --src-repo-id=your-username/dataset-name \
+    --dst-repo-id=your-username/dataset-name-v3
+```
+
+**Parameters:**
+
+- `--src-repo-id`: Source repository ID (LeRobot 2.1 format dataset)
+- `--dst-repo-id`: Destination repository ID for the converted 3.0 format dataset
+
+**What this conversion does:**
+
+- Generates per-episode statistics and writes them in `episodes_stats.jsonl`
+- Updates codebase version in `info.json`
+- Removes deprecated `stats.json`
+- Pushes the new version to the hub with "v3.0" tag
 
 #### Data Formats
 
@@ -134,13 +199,17 @@ Remember to update below settings when preparing data:
 
 If there is no need to convert, we can directly download datasets as below:
 
-**On Saturn:**
+**On Saturn Cloud:**
 
-huggingface-cli download --resume-download Anlorla/push_block_dual_lerobot21 --local-dir  ~/workspace/.cache/huggingface/lerobot/Anlorla/push_block_dual --repo-type dataset
+```bash 
+huggingface-cli download --resume-download Anlorla/push_block_dual_lerobot21 --local-dir  ~/workspace/.cache/huggingface/lerobot/Anlorla/push_block_dual --repo-type datasetbash 
+```
 
 **On Vast.ai:**
 
+```bash
 huggingface-cli download --resume-download Anlorla/sweep2E_dualarm_v2 --local-dir  /workspace/.hf_home/lerobot/Anlorla/sweep2E_dualarm_v2 --repo-type dataset
+```
 
 ## Training
 
@@ -229,7 +298,7 @@ Start the policy server before configuring and launching the robot system:
 cd openpi
 uv run scripts/serve_policy.py policy:checkpoint \
   --policy.config=pi05_npm\
-  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm/pi05_sweep2E_dualarm_v3.1
+  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm/pi05_sweep2cross_v1
 ```
 
 See the [Inference](#inference) section for more details on policy server configuration.
@@ -611,7 +680,6 @@ Always plug in cables **before** powering on
 
 For the latest version of launch file of this program, refer to:
 https://github.com/Jeong-zju/zeno-wholebody-teleop/tree/master
-
 
 ### Camara "No Image"
 
