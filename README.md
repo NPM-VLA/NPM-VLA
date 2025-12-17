@@ -75,7 +75,7 @@ Add the IP addresses and hostnames of both machines:
 
 #### Recording Data
 
-Use the recording script `record.sh` to collect teleoperation data: 
+Use the recording script `record.sh` to collect teleoperation data:
 
 ```bash
 bash record.sh
@@ -201,7 +201,7 @@ If there is no need to convert, we can directly download datasets as below:
 
 **On Saturn Cloud:**
 
-```bash 
+```bash
 huggingface-cli download --resume-download Anlorla/push_block_dual_lerobot21 --local-dir  ~/workspace/.cache/huggingface/lerobot/Anlorla/push_block_dual --repo-type datasetbash 
 ```
 
@@ -212,6 +212,74 @@ huggingface-cli download --resume-download Anlorla/sweep2E_dualarm_v2 --local-di
 ```
 
 ## Training
+
+### 0. Configure Training Settings
+
+Before training, you need to configure your training settings in `src/openpi/training/config.py`.
+
+#### Create Your Custom TrainConfig
+
+You can copy an existing configuration (like `pi0_npm` or `pi05_npm`) and create your own:
+
+```python
+# In src/openpi/training/config.py, add to _CONFIGS list:
+
+TrainConfig(
+    name="pi0_npm",  # Change this to your config name
+    # Dual-arm robot with 14-dim actions (7 per arm) and 16-dim state (8 per arm)
+    model=pi0_config.Pi0Config(
+        pi05=False,
+        action_horizon=10,
+        discrete_state_input=False,
+    ),
+    data=LeRobotZenoDataConfig(
+        repo_id="Anlorla/sweep2E_dualarm_v1_primitives_200",  # Your dataset repo ID
+        base_config=DataConfig(
+            prompt_from_task=True,
+            action_sequence_keys=("action",),  # Specify the action key from dataset
+        ),
+        extra_delta_transform=False,
+    ),
+    batch_size=32,
+    lr_schedule=_optimizer.CosineDecaySchedule(
+        warmup_steps=10_000,
+        peak_lr=5e-5,
+        decay_steps=1_000_000,
+        decay_lr=5e-5,
+    ),
+    optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+    ema_decay=0.999,
+    weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+    pytorch_weight_path=None,  # not use for now
+    num_train_steps=12_000,
+),
+```
+
+#### Key Configuration Parameters
+
+**Model Configuration:**
+- `pi05`: Set to `True` for Pi0.5 model, `False` for Pi0
+- `action_horizon`: Number of future action steps to predict
+- `discrete_state_input`: Use discrete state input (default: `False`)
+
+**Data Configuration:**
+- `repo_id`: Your Hugging Face dataset repository ID (e.g., `"your-username/your-dataset"`)
+- `prompt_from_task`: Load task instructions from dataset
+- `action_sequence_keys`: Keys in dataset containing action sequences
+- `extra_delta_transform`: Apply delta action transform (set based on your data format)
+
+**Training Hyperparameters:**
+- `batch_size`: Training batch size (adjust based on GPU memory)
+- `warmup_steps`: Number of warmup steps for learning rate schedule
+- `peak_lr`: Peak learning rate
+- `num_train_steps`: Total number of training steps
+
+**Model Initialization:**
+- `weight_loader`: Path to pretrained checkpoint to initialize from
+  - Pi0 base: `"gs://openpi-assets/checkpoints/pi0_base/params"`
+  - Pi0.5 base: `"gs://openpi-assets/checkpoints/pi05_base/params"`
+
+**Note:** Make sure your `repo_id` matches the dataset you uploaded or downloaded in the [Data Conversion](#data-conversion) or [Dataset Download](#dataset-download) sections.
 
 ### 1. Compute Normalization Statistics
 
@@ -278,6 +346,52 @@ uv run scripts/serve_policy.py policy:checkpoint \
 - The checkpoint directory should contain the model weights and configuration files from training
 - The policy server will initialize the model and wait for observation inputs
 - Make sure the configuration name matches the one used during training
+
+### Real-Time Chunking (RTC) Policy Server
+
+For improved real-time performance with action chunking, use the RTC-capable policy server:
+
+```bash
+cd openpi
+uv run scripts/serve_policy_rtc.py policy:checkpoint \
+  --policy.config=pi05_npm \
+  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm/pi05_sweep2cross_lerobot21_prim_v2
+```
+
+**What is RTC?**
+
+Real-Time Chunking (RTC) implements the algorithm from "Real-Time Execution of Action Chunking Flow Policies" (Black et al., 2025). It improves policy execution by:
+
+1. **Guided Inference**: Uses VJP (Vector-Jacobian Product) to align new action chunks with previously executed actions
+2. **Prefix Attention**: Applies soft-masking to ensure smooth transitions between action chunks
+3. **Adaptive Replanning**: Dynamically adjusts execution horizon based on observed inference delays
+
+**Key RTC Parameters:**
+
+- `control_freq`: Control loop frequency (default: 25 Hz)
+- `action_horizon`: Prediction horizon H (default: 20 steps)
+- `s_min`: Minimum execution horizon (default: 8 steps)
+- `delay_buf_size`: Delay buffer size for adaptive scheduling (default: 10)
+- `num_flow_steps`: Number of denoising steps (default: 5)
+- `max_guidance_weight`: Maximum guidance strength β (default: 5.0)
+- `prefix_attention_schedule`: Weight decay schedule ("exp", "linear", default: "exp")
+
+**RTC vs Standard Inference:**
+
+| Feature               | Standard        | RTC                 |
+| --------------------- | --------------- | ------------------- |
+| Replan frequency      | Fixed           | Adaptive            |
+| Action smoothness     | May have jumps  | Smooth transitions  |
+| Latency handling      | No compensation | Delay-aware         |
+| Real-time feasibility | Not guaranteed  | Constraint-enforced |
+
+**When to use RTC:**
+
+- ✅ High-frequency control tasks (>20 Hz)
+- ✅ Tasks requiring smooth action execution
+- ✅ Environments with variable network latency
+- ⚠️ Requires model trained with flow matching (Pi0, OpenVLA)
+- ⚠️ Adds ~10-20% inference overhead due to guided sampling
 
 ## Deployment Workflow
 
@@ -371,11 +485,19 @@ source .venv/bin/activate
 # Set ROS master URI (adjust if running on a different machine)
 export ROS_MASTER_URI=http://localhost:11311
 
-# Run the VLA policy controller
+# Run the VLA policy controller (Standard)
 uv run scripts/piper_pi05_main.py
+
+# OR: Run with Real-Time Chunking (RTC) for improved performance
+uv run scripts/piper_main_rtc.py
 ```
 
-**What this script does:**
+**Script Options:**
+
+- `piper_pi05_main.py`: Standard policy controller with simple action chunking
+- `piper_main_rtc.py`: RTC-enabled controller with adaptive execution and guided inference
+
+**What these scripts do:**
 
 1. **Observation Collection**: Subscribes to robot state and camera topics to gather observations
 
@@ -388,8 +510,15 @@ uv run scripts/piper_pi05_main.py
    - Queries the policy server for action predictions
 3. **Action Execution**: Publishes predicted actions to robot command topics
 
-   - Left arm actions: `/robot/arm_left/vla_pos_cmd`
-   - Right arm actions: `/robot/arm_right/vla_pos_cmd`
+   - Left arm actions: `/robot/arm_left/vla_pos_cmd` (or `/vla_joint_cmd` for RTC)
+   - Right arm actions: `/robot/arm_right/vla_pos_cmd` (or `/vla_joint_cmd` for RTC)
+
+**RTC-specific behavior:**
+
+- **Background inference**: Runs policy inference in a separate thread
+- **Adaptive replanning**: Adjusts execution horizon based on observed delays
+- **Delay compensation**: Maintains real-time constraints (d ≤ s ≤ H - d)
+- **Smooth transitions**: Uses prefix attention to align action chunks
 
 ### System Architecture
 
