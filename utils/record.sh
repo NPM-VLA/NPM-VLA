@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 
-BASE_NAME="push_block_dual3/push_block_dual3_"
+BASE_NAME="sweep2yellow_v2/sweep2yellow_v2_"
 
 idx=0
 while ls ${BASE_NAME}_$(printf "%03d" $idx).bag >/dev/null 2>&1; do
@@ -41,8 +41,6 @@ while true; do
         /robot/arm_right/joint_states_single \
         /robot/arm_left/pos_cmd \
         /robot/arm_right/pos_cmd \
-        /teleop/arm_left/end_pose \
-        /teleop/arm_right/end_pose \
         /teleop/arm_left/joint_states_single \
         /teleop/arm_right/joint_states_single \
         /realsense_left/color/image_raw/compressed \

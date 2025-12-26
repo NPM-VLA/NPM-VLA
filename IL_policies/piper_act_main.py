@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+"""
+ACT Policy Deployment for Piper Dual-Arm Robot (LeRobot)
+
+关键修复：
+1. [FIX-1] State 输入归一化: (state - mean) / std
+2. [FIX-2] Image 输入 ImageNet 归一化: (img - mean) / std
+3. [FIX-3] Action 输出反归一化: action * std + mean
+4. [FIX-4] Publisher topic 左右修正
+5. [FIX-5] 控制频率匹配数据集 fps (10 Hz)
+"""
 import json
 from pathlib import Path
 
@@ -11,6 +21,94 @@ import torch
 
 from lerobot.policies.act.configuration_act import ACTConfig
 from lerobot.policies.act.modeling_act import ACTPolicy
+
+
+# ====== [FIX-1, FIX-2, FIX-3] 归一化统计量 ======
+# Image 归一化参数（ImageNet 标准）
+IMAGE_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+IMAGE_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+# State 和 Action 归一化参数将从 checkpoint 中加载
+STATE_MEAN = None
+STATE_STD = None
+ACTION_MEAN = None
+ACTION_STD = None
+
+
+def load_normalization_stats(ckpt_path: Path):
+    """
+    从 checkpoint 目录加载归一化统计量。
+
+    需要的文件：
+    - policy_preprocessor_step_3_normalizer_processor.safetensors (state normalizer)
+    - policy_postprocessor_step_0_unnormalizer_processor.safetensors (action unnormalizer)
+    """
+    global STATE_MEAN, STATE_STD, ACTION_MEAN, ACTION_STD
+
+    try:
+        from safetensors.torch import load_file
+    except ImportError:
+        raise RuntimeError("safetensors is required. Install it with: pip install safetensors")
+
+    # Load state normalizer
+    state_normalizer_path = ckpt_path / "policy_preprocessor_step_3_normalizer_processor.safetensors"
+    if state_normalizer_path.exists():
+        rospy.loginfo(f"  → Loading state normalizer from {state_normalizer_path.name}")
+        stats = load_file(str(state_normalizer_path))
+
+        # Debug: print available keys
+        rospy.loginfo(f"  → Available keys in state normalizer: {list(stats.keys())}")
+
+        # Try different possible key names
+        if 'mean' in stats and 'std' in stats:
+            STATE_MEAN = stats['mean'].numpy().astype(np.float32)
+            STATE_STD = stats['std'].numpy().astype(np.float32)
+        else:
+            # If only one or two tensors, read them in order
+            keys = list(stats.keys())
+            if len(keys) >= 2:
+                STATE_MEAN = stats[keys[0]].numpy().astype(np.float32)
+                STATE_STD = stats[keys[1]].numpy().astype(np.float32)
+                rospy.loginfo(f"  → Using keys: mean='{keys[0]}', std='{keys[1]}'")
+            else:
+                raise ValueError(f"Unexpected keys in state normalizer: {keys}")
+
+        rospy.loginfo(f"  ✓ State normalizer loaded: mean shape={STATE_MEAN.shape}, std shape={STATE_STD.shape}")
+    else:
+        rospy.logwarn(f"  ⚠️ State normalizer not found at {state_normalizer_path}")
+        rospy.logwarn("  ⚠️ State normalization will be DISABLED (this may cause poor performance!)")
+        STATE_MEAN = np.zeros(14, dtype=np.float32)
+        STATE_STD = np.ones(14, dtype=np.float32)
+
+    # Load action unnormalizer
+    action_unnormalizer_path = ckpt_path / "policy_postprocessor_step_0_unnormalizer_processor.safetensors"
+    if action_unnormalizer_path.exists():
+        rospy.loginfo(f"  → Loading action unnormalizer from {action_unnormalizer_path.name}")
+        stats = load_file(str(action_unnormalizer_path))
+
+        # Debug: print available keys
+        rospy.loginfo(f"  → Available keys in action unnormalizer: {list(stats.keys())}")
+
+        # Try different possible key names
+        if 'mean' in stats and 'std' in stats:
+            ACTION_MEAN = stats['mean'].numpy().astype(np.float32)
+            ACTION_STD = stats['std'].numpy().astype(np.float32)
+        else:
+            # If only one or two tensors, read them in order
+            keys = list(stats.keys())
+            if len(keys) >= 2:
+                ACTION_MEAN = stats[keys[0]].numpy().astype(np.float32)
+                ACTION_STD = stats[keys[1]].numpy().astype(np.float32)
+                rospy.loginfo(f"  → Using keys: mean='{keys[0]}', std='{keys[1]}'")
+            else:
+                raise ValueError(f"Unexpected keys in action unnormalizer: {keys}")
+
+        rospy.loginfo(f"  ✓ Action unnormalizer loaded: mean shape={ACTION_MEAN.shape}, std shape={ACTION_STD.shape}")
+    else:
+        rospy.logwarn(f"  ⚠️ Action unnormalizer not found at {action_unnormalizer_path}")
+        rospy.logwarn("  ⚠️ Action unnormalization will be DISABLED (this may cause poor performance!)")
+        ACTION_MEAN = np.zeros(14, dtype=np.float32)
+        ACTION_STD = np.ones(14, dtype=np.float32)
 
 
 # ----------------- Global buffers -----------------
@@ -68,17 +166,34 @@ def cb_joints_right(msg: JointState):
     rospy.logdebug(f"Received right arm joint states: {latest_q['right'][:3]}...")
 
 
-# ----------------- Utility: image -> torch tensor -----------------
+# ----------------- [FIX-2] Image preprocessing with ImageNet normalization -----------------
 def preprocess_image(img_bgr: np.ndarray) -> torch.Tensor:
     """
-    Convert BGR uint8 (H,W,3) to float32 torch tensor (1,3,256,256) in [0,1].
+    Convert BGR uint8 (H,W,3) to normalized float32 torch tensor (1,3,256,256).
+    Applies ImageNet normalization: (img - mean) / std
     """
     img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     img = cv2.resize(img, (256, 256), interpolation=cv2.INTER_AREA)
-    img = img.astype(np.float32) / 255.0  # [H,W,3]
+    img = img.astype(np.float32) / 255.0  # [H,W,3] in [0,1]
+
+    # ====== [FIX-2] ImageNet 归一化 ======
+    img = (img - IMAGE_MEAN) / IMAGE_STD
+
     img = np.transpose(img, (2, 0, 1))    # [3,H,W]
     img = np.expand_dims(img, 0)          # [1,3,H,W]
     return torch.from_numpy(img)
+
+
+# ----------------- [FIX-1] State normalization -----------------
+def normalize_state(state: np.ndarray) -> np.ndarray:
+    """Normalize state: (state - mean) / std"""
+    return (state - STATE_MEAN) / STATE_STD
+
+
+# ----------------- [FIX-3] Action unnormalization -----------------
+def unnormalize_action(action: np.ndarray) -> np.ndarray:
+    """Unnormalize action: action * std + mean"""
+    return action * ACTION_STD + ACTION_MEAN
 
 
 # ----------------- Load ACT policy -----------------
@@ -207,6 +322,10 @@ def main():
     policy = load_policy(ckpt_dir, device)
     policy.reset()  # Reset the action queue for ACT policy
 
+    # Load normalization statistics from checkpoint
+    ckpt_path = Path(ckpt_dir).expanduser().resolve()
+    load_normalization_stats(ckpt_path)
+
     # ----------------- ROS subs / pubs -----------------
     rospy.Subscriber(
         "/realsense_top/color/image_raw/compressed",
@@ -288,6 +407,10 @@ def main():
         state_np = np.concatenate(
             [latest_q["left"], latest_q["right"]], axis=0
         ).astype(np.float32)
+
+        # ====== [FIX-1] State 归一化 ======
+        state_np = normalize_state(state_np)
+
         state = torch.from_numpy(state_np[None, :]).to(device)  # [1,14]
 
         obs = {
@@ -336,6 +459,9 @@ def main():
                 break
 
             action = actions[i]
+
+            # ====== [FIX-3] Action 反归一化 ======
+            action = unnormalize_action(action)
 
             # Split into left/right (14-dim total: 7 joints per arm)
             action_left = action[:7].copy()

@@ -2,6 +2,8 @@
 
 This project is based on [OpenPI](https://github.com/Physical-Intelligence/openpi) and follows the official OpenPI workflow for robot learning and policy training.
 
+> **💡 Tip:** If you encounter any issues during setup, training, or deployment, please refer to the [Troubleshooting](#troubleshooting) section first.
+
 ## Installation
 
 ### 1. Clone the Repository with Submodules
@@ -202,13 +204,13 @@ If there is no need to convert, we can directly download datasets as below:
 **On Saturn Cloud:**
 
 ```bash
-huggingface-cli download --resume-download Anlorla/push_block_dual_lerobot21 --local-dir  ~/workspace/.cache/huggingface/lerobot/Anlorla/push_block_dual --repo-type datasetbash 
+huggingface-cli download --resume-download Anlorla/sweep2cross_lerobot21_prim_enriched --local-dir  ~/.cache/huggingface/lerobot/Anlorla/sweep2cross_lerobot21_prim_enriched --repo-type dataset
 ```
 
 **On Vast.ai:**
 
 ```bash
-huggingface-cli download --resume-download Anlorla/sweep2E_dualarm_v2 --local-dir  /workspace/.hf_home/lerobot/Anlorla/sweep2E_dualarm_v2 --repo-type dataset
+huggingface-cli download --resume-download Anlorla/sweep2cross_lerobot21_masked_enriched--local-dir  /workspace/.hf_home/lerobot/Anlorla/sweep2cross_lerobot21_masked_enriched --repo-type dataset
 ```
 
 ## Training
@@ -222,27 +224,27 @@ Before training, you need to configure your training settings in `src/openpi/tra
 You can copy an existing configuration (like `pi0_npm` or `pi05_npm`) and create your own:
 
 ```python
-# In src/openpi/training/config.py, add to _CONFIGS list:
+ # In src/openpi/training/config.py, add to _CONFIGS list:
 
 TrainConfig(
-    name="pi0_npm",  # Change this to your config name
+    name="pi0_npm",  # ** Change this to your custom config name
     # Dual-arm robot with 14-dim actions (7 per arm) and 16-dim state (8 per arm)
     model=pi0_config.Pi0Config(
-        pi05=False,
-        action_horizon=10,
+        pi05=False, # ** Set True for Pi0.5, False for Pi0 base model
+        action_horizon=10, # ** Number of future action steps to predict (typically 10-20)
         discrete_state_input=False,
     ),
     data=LeRobotZenoDataConfig(
-        repo_id="Anlorla/sweep2E_dualarm_v1_primitives_200",  # Your dataset repo ID
+        repo_id="Anlorla/sweep2E_alarm_v1_primitives_200",  # ** Your HuggingFace dataset repository ID
         base_config=DataConfig(
             prompt_from_task=True,
             action_sequence_keys=("action",),  # Specify the action key from dataset
         ),
         extra_delta_transform=False,
     ),
-    batch_size=32,
-    lr_schedule=_optimizer.CosineDecaySchedule(
-        warmup_steps=10_000,
+    batch_size=32, # ** Adjust based on GPU memory (16/32/64)
+    lr_schedule=_optimizer.CosineDecaySchedule( # ** Learning rate schedule configuration
+        warmup_steps=10_000, # ** See warmup_steps guidelines below
         peak_lr=5e-5,
         decay_steps=1_000_000,
         decay_lr=5e-5,
@@ -251,33 +253,54 @@ TrainConfig(
     ema_decay=0.999,
     weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
     pytorch_weight_path=None,  # not use for now
-    num_train_steps=12_000,
+    num_train_steps=12_000, # ** Total training steps (depends on dataset size and desired epochs)
 ),
 ```
 
 #### Key Configuration Parameters
 
 **Model Configuration:**
+
 - `pi05`: Set to `True` for Pi0.5 model, `False` for Pi0
 - `action_horizon`: Number of future action steps to predict
 - `discrete_state_input`: Use discrete state input (default: `False`)
 
 **Data Configuration:**
+
 - `repo_id`: Your Hugging Face dataset repository ID (e.g., `"your-username/your-dataset"`)
 - `prompt_from_task`: Load task instructions from dataset
 - `action_sequence_keys`: Keys in dataset containing action sequences
 - `extra_delta_transform`: Apply delta action transform (set based on your data format)
 
 **Training Hyperparameters:**
+
 - `batch_size`: Training batch size (adjust based on GPU memory)
 - `warmup_steps`: Number of warmup steps for learning rate schedule
 - `peak_lr`: Peak learning rate
 - `num_train_steps`: Total number of training steps
 
 **Model Initialization:**
+
 - `weight_loader`: Path to pretrained checkpoint to initialize from
   - Pi0 base: `"gs://openpi-assets/checkpoints/pi0_base/params"`
   - Pi0.5 base: `"gs://openpi-assets/checkpoints/pi05_base/params"`
+
+**Warmup Steps Guidelines:**
+
+The `warmup_steps` parameter controls the learning rate warm-up period. Recommended values:
+
+- **Full Fine-tuning**: Set `warmup_steps` to approximately **30% of `num_train_steps`**
+  - Example: If `num_train_steps=12_000`, use `warmup_steps=3_600`
+- **LoRA Fine-tuning**: Set `warmup_steps` to approximately **5-10% of `num_train_steps`**
+  - Example: If `num_train_steps=12_000`, use `warmup_steps=600` to `1_200`
+
+**Monitoring Training:**
+
+After training starts, you can monitor your training progress and configuration using Weights & Biases (wandb):
+
+1. Check the terminal output for the wandb run URL
+2. Visit the URL to view real-time training metrics, losses, and hyperparameter configuration
+3. All training configurations will be automatically logged to wandb for reproducibility
 
 **Note:** Make sure your `repo_id` matches the dataset you uploaded or downloaded in the [Data Conversion](#data-conversion) or [Dataset Download](#dataset-download) sections.
 
@@ -311,9 +334,111 @@ Remember to update below settings when finetuing:
 1. repo_id: same as REPO_NAME
 2. some params will infect the training process, like lr_schedule and so on.
 
+### 3. Upload Checkpoints to HuggingFace
+
+After training completes, it's important to upload your trained checkpoints to HuggingFace Hub for version control and easy deployment across different machines.
+
+**Upload Script:**
+
+Use the `upload_ckpt_to_hf.py` utility script to upload your checkpoint:
+
+```bash
+python ../utils/upload_ckpt_to_hf.py \
+    --repo_id Anlorla/pi05_sweep_lora_v1 \
+    --ckpt_dir /home/jovyan/workspace/openpi/checkpoints/pi05_npm_lora/sweep_100_v1_lora/11999/ \
+    --repo_type model
+```
+
+**Parameters:**
+
+- `--repo_id`: Your HuggingFace repository ID (format: `username/model-name`)
+- `--ckpt_dir`: Local path to the checkpoint directory (typically under `checkpoints/<config_name>/<exp_name>/<step>/`)
+- `--repo_type`: Repository type (use `model` for policy checkpoints)
+
+**Example:**
+
+```bash
+# Upload a full fine-tuning checkpoint
+python ../utils/upload_ckpt_to_hf.py \
+    --repo_id your-username/pi05_sweep_full_v1 \
+    --ckpt_dir /path/to/openpi/checkpoints/pi05_npm/sweep_experiment/12000/ \
+    --repo_type model
+
+# Upload a LoRA checkpoint
+python ../utils/upload_ckpt_to_hf.py \
+    --repo_id your-username/pi0_task_lora_v2 \
+    --ckpt_dir /path/to/openpi/checkpoints/pi0_npm_lora/task_name/5999/ \
+    --repo_type model
+```
+
+**Notes:**
+
+- Make sure you're logged into HuggingFace CLI: `huggingface-cli login`
+- The checkpoint directory should contain all necessary model files (params, config, etc.)
+- Consider using descriptive repository names that indicate the model type, task, and version
+- You can upload multiple checkpoints from the same training run to compare different steps
+
 ## Inference
 
-After training is complete,  run inference using the trained policy checkpoint. The policy server loads the trained model and provides action predictions based on observations and prompts.
+Before running inference, you need to download the trained model weights from HuggingFace Hub.
+
+### Download Model Weights
+
+There are three methods to download model weights from HuggingFace, depending on your network setup:
+
+#### Method 1: HuggingFace with VPN
+
+If you have access to VPN, you can directly download from HuggingFace Hub:
+
+```bash
+# Set up proxy (adjust based on your proxy configuration)
+# Option A: Use host machine proxy
+export http_proxy=http://127.0.0.1:7890
+export https_proxy=https://127.0.0.1:7890
+
+# Option B: Use LAN proxy
+export http_proxy=http://192.168.x.x:7890
+export https_proxy=https://192.168.x.x:7890
+
+# Download the model
+huggingface-cli download --resume-download Anlorla/pi05_recover_full_v1 \
+    --local-dir /home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm \
+    --repo-type model
+```
+
+#### Method 2: HuggingFace Mirror
+
+Use a mirror site to bypass network restrictions:
+
+```bash
+# Set HuggingFace endpoint to mirror
+export HF_ENDPOINT="https://hf-mirror.com"
+
+# Download the model
+huggingface-cli download --resume-download Anlorla/pi05_recover_full_v1 \
+    --local-dir /home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm \
+    --repo-type model
+```
+
+#### Method 3: Dropbox (Coming Soon)
+
+> **Note:** Dropbox download method is under development and will be available in a future update.
+
+**Download Parameters:**
+
+- `--resume-download`: Resume interrupted downloads (recommended for large models)
+- `--local-dir`: Local directory to save the model (should match your checkpoint path in inference config)
+- `--repo-type model`: Specify that you're downloading a model (not a dataset)
+
+**Important Notes:**
+
+- Make sure the `--local-dir` path matches the `--policy.dir` path you'll use in the inference command
+- The download may take some time depending on model size and network speed
+- Use `--resume-download` to safely resume if the download is interrupted
+
+### Start Inference
+
+After downloading model weights, run inference using the trained policy checkpoint. The policy server loads the trained model and provides action predictions based on observations and prompts.
 
 ### Start Policy Server
 
@@ -399,12 +524,34 @@ This section covers deploying the trained policy on real robot hardware. The dep
 
 ### Prerequisites
 
+- **⚠️ Model Weights Downloaded**: Before deployment, you MUST download the trained model weights from HuggingFace Hub following the instructions in the [Download Model Weights](#download-model-weights) section
 - Trained policy checkpoint (see [Training](#training) and [Inference](#inference) sections)
 - Policy server running (see [Inference](#inference) section, remember to modify `src\openpi\training\config.py`)
 - Robot hardware setup (refer to [zeno-wholebody-teleop](https://github.com/Jeong-zju/zeno-wholebody-teleop))
 - ROS environment properly configured
 
-### 0. Start Policy Server
+### 0. Download Model Weights (If Not Already Done)
+
+**Before starting deployment**, ensure you have downloaded the trained model weights. If you haven't done so, follow the [Download Model Weights](#download-model-weights) section in the Inference chapter.
+
+**Quick Download Example:**
+
+```bash
+# Method 1: HuggingFace with VPN
+export http_proxy=http://127.0.0.1:7890
+export https_proxy=https://127.0.0.1:7890
+huggingface-cli download --resume-download your-username/your-model \
+    --local-dir /home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm \
+    --repo-type model
+
+# Method 2: HuggingFace Mirror
+export HF_ENDPOINT="https://hf-mirror.com"
+huggingface-cli download --resume-download your-username/your-model \
+    --local-dir /home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm \
+    --repo-type model
+```
+
+### 1. Start Policy Server
 
 Start the policy server before configuring and launching the robot system:
 
@@ -412,40 +559,86 @@ Start the policy server before configuring and launching the robot system:
 cd openpi
 uv run scripts/serve_policy.py policy:checkpoint \
   --policy.config=pi05_npm\
-  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm/pi05_sweep2cross_v1
+  --policy.dir=/home/zeno/NPM-VLA-Project/NPM-VLA/openpi/checkpoints/pi05_npm/pi05_sweep2cross_enriched
 ```
 
 See the [Inference](#inference) section for more details on policy server configuration.
 
 ### 1. Configure Launch Files
 
-Before starting the robot, modify the ROS launch files to redirect control commands from teleoperation to VLA policy output.
+Before starting the robot, you need to configure the ROS launch files to switch between different operation modes: teleoperation, VLA testing with gripper, or VLA testing without gripper.
 
-**Edit `piper_dual_robot.launch`:**
+**Configuration File Location:**
 
-SSH into slave machine and edit the launch file:
+Edit the main configuration file:
 
-```ssh
-code /home/zeno/piper_ros/src/zeno-wholebody-teleop/common/piper_ctrl/launch/piper_dual_robot.launch
+```bash
+vim /home/zeno/piper_ros/src/zeno-wholebody-teleop/common/piper_ctrl/config/piper_dual.yaml
 ```
 
-Comment out the teleoperation command mapping and add VLA command mapping:
+**Configuration Modes:**
 
-```xml
-<!-- Original teleoperation mapping (comment out) -->
-<!-- <remap from="$(arg robot_prefix_left)joint_pos_cmd" to="$(arg teleop_prefix_left)joint_states_single"/> -->
-<!-- <remap from="$(arg robot_prefix_right)joint_pos_cmd" to="$(arg teleop_prefix_right)joint_states_single"/> -->
+The key configuration section is the `remap` settings for each arm. Below are three common modes (using right arm as example):
 
-<!-- New VLA policy mapping -->
-<remap from="$(arg robot_prefix_left)joint_pos_cmd" to="$(arg robot_prefix_left)vla_pos_cmd"/>
-<remap from="$(arg robot_prefix_right)joint_pos_cmd" to="$(arg robot_prefix_right)vla_pos_cmd"/>
+#### Mode 1: VLA Testing with Gripper
+
+Use this mode when testing the VLA policy with gripper control:
+
+```yaml
+remap:
+  joint_pos_cmd_to: "/robot/arm_right/vla_joint_cmd"
+  gripper_pos_cmd_to: "/robot/arm_right/vla_joint_cmd"    # Gripper controlled by VLA
+  # gripper_pos_cmd_to: "/robot/arm_right/joint_pos_cmd"  # Commented out
 ```
 
-**or directly copy the launch file  `utils\deploy_piper_dual_robot.launch `and paste .
+**What this does:** Both arm joints and gripper are controlled by the VLA policy output on `/robot/arm_right/vla_joint_cmd` topic.
 
-**Why this change?**
+#### Mode 2: VLA Testing without Gripper
 
-This remapping redirects the joint position commands from teleoperation topics to VLA policy output topics, allowing the trained model to control the robot instead of manual teleoperation.
+Use this mode when testing the VLA policy without gripper control (gripper controlled separately):
+
+```yaml
+remap:
+  joint_pos_cmd_to: "/robot/arm_right/vla_joint_cmd"
+  gripper_pos_cmd_to: "/robot/arm_right/joint_pos_cmd"    # Gripper controlled separately
+  # gripper_pos_cmd_to: "/robot/arm_right/vla_joint_cmd"  # Commented out
+```
+
+**What this does:** Arm joints are controlled by VLA policy, but the gripper is controlled separately through the standard control interface.
+
+#### Mode 3: Teleoperation Mode
+
+Use this mode for manual teleoperation (data collection or manual control):
+
+```yaml
+remap:
+  # joint_pos_cmd_to: "/robot/arm_right/vla_joint_cmd"     # Commented out
+  # gripper_pos_cmd_to: "/robot/arm_right/joint_pos_cmd"   # Commented out
+  # gripper_pos_cmd_to: "/robot/arm_right/vla_joint_cmd"   # Commented out
+  joint_pos_cmd_to: "/teleop/arm_right/joint_states_single"
+  gripper_pos_cmd_to: "/teleop/arm_right/joint_states_single"
+```
+
+**What this does:** Both arm and gripper are controlled by teleoperation commands for manual operation.
+
+**Important Notes:**
+
+- Apply the same configuration for both left and right arms in the file
+- **⚠️ CRITICAL: After modifying the YAML configuration, you MUST source the workspace before launching:**
+  ```bash
+  source devel/setup.bash
+  ```
+  Without sourcing, the configuration changes will not take effect!
+- Remember to restart the ROS nodes after modifying the configuration
+- For dual-arm tasks, ensure both arms use consistent control modes
+
+**Quick Reference:**
+
+| Mode | Arm Control | Gripper Control | Use Case |
+|------|-------------|-----------------|----------|
+| VLA with Gripper | VLA | VLA | Full VLA policy control |
+| VLA without Gripper | VLA | Separate | VLA arm control only |
+| Teleoperation | Teleop | Teleop | Data collection/Manual control |
 
 ### 2. Start Robot Control System
 
@@ -632,7 +825,18 @@ conda activate lerobot
 export ROS_MASTER_URI=http://localhost:11311
 
 cd IL_policies
-python piper_dp_main.py
+(lerobot) zeno@zeno-teleop ~/NPM-VLA-Project/NPM-VLA/IL_policies (main) $ python piper_act_main.py
+[INFO] [1766063733.469552]: Loading ACT Policy from: /home/zeno/NPM-VLA-Project/NPM-VLA/IL_policies/checkpoints/push_block_act
+[INFO] [1766063734.133805]:   → Loading weights from model.safetensors
+[INFO] [1766063734.330887]:   → Loading state normalizer from policy_preprocessor_step_3_normalizer_processor.safetensors
+Traceback (most recent call last):
+  File "/home/zeno/NPM-VLA-Project/NPM-VLA/IL_policies/piper_act_main.py", line 505, in <module>
+    main()
+  File "/home/zeno/NPM-VLA-Project/NPM-VLA/IL_policies/piper_act_main.py", line 295, in main
+    load_normalization_stats(ckpt_path)
+  File "/home/zeno/NPM-VLA-Project/NPM-VLA/IL_policies/piper_act_main.py", line 58, in load_normalization_stats
+    STATE_MEAN = stats['mean'].numpy().astype(np.float32)
+KeyError: 'mean'
 ```
 
 **Script Configuration** (`piper_dp_main.py`):

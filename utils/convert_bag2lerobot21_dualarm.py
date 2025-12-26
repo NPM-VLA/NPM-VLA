@@ -7,7 +7,7 @@ from multiprocessing import Pool, Manager, Lock
 from functools import partial
 
 from rosbags.highlevel import AnyReader
-from lerobot.datasets.lerobot_dataset import HF_LEROBOT_HOME, LeRobotDataset
+from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME, LeRobotDataset
 from huggingface_hub import hf_hub_download, list_repo_files
 
 REPO_NAME = "zeno/sweep2E_v1"
@@ -36,14 +36,17 @@ CAM_WRIST_LEFT = "/realsense_left/color/image_raw/compressed"
 CAM_WRIST_RIGHT = "/realsense_right/color/image_raw/compressed"
 STATE_LEFT = "/robot/arm_left/joint_states_single"
 STATE_RIGHT = "/robot/arm_right/joint_states_single"
-ACTION_LEFT = "/robot/arm_left/joint_states_single"
-ACTION_RIGHT = "/robot/arm_right/joint_states_single"
+ACTION_LEFT = "/teleop/arm_left/joint_states_single"
+ACTION_RIGHT = "/teleop/arm_right/joint_states_single"
+
+END_POSE_LEFT = "/robot/arm_left/end_pose"
+END_POSE_RIGHT = "/robot/arm_right/end_pose"
 
 # ============================================================
 # CONVERSION SETTINGS
 # ============================================================
 FPS = 10
-IMG_SIZE = (256, 256)
+IMG_SIZE = (224, 224)
 # TODO:
 NUM_WORKERS = 15  # Number of CPU cores to use
 
@@ -166,6 +169,8 @@ def process_single_bag(args):
                 STATE_RIGHT,
                 ACTION_LEFT,
                 ACTION_RIGHT,
+                END_POSE_LEFT,
+                END_POSE_RIGHT,
             }
             topic_to_msgs = {topic: [] for topic in interested_topics}
 
@@ -193,6 +198,10 @@ def process_single_bag(args):
             state_right_msgs = topic_to_msgs[STATE_RIGHT]
             action_left_msgs = topic_to_msgs[ACTION_LEFT]
             action_right_msgs = topic_to_msgs[ACTION_RIGHT]
+
+            # New topics
+            end_pose_left_msgs = topic_to_msgs[END_POSE_LEFT]
+            end_pose_right_msgs = topic_to_msgs[END_POSE_RIGHT]
 
             if not cam_main_msgs or not cam_wrist_left_msgs or not cam_wrist_right_msgs:
                 with lock:
@@ -228,6 +237,17 @@ def process_single_bag(args):
             )
             wrist_right_times = np.array(
                 [t for t, _ in cam_wrist_right_msgs], dtype=np.int64
+            )
+
+            end_pose_left_times = (
+                np.array([t for t, _ in end_pose_left_msgs], dtype=np.int64)
+                if end_pose_left_msgs
+                else np.array([], dtype=np.int64)
+            )
+            end_pose_right_times = (
+                np.array([t for t, _ in end_pose_right_msgs], dtype=np.int64)
+                if end_pose_right_msgs
+                else np.array([], dtype=np.int64)
             )
 
             with lock:
@@ -336,7 +356,8 @@ def process_single_bag(args):
                 q_robot_left = np.array(state_left_msg.position, dtype=np.float32)
                 q_robot_right = np.array(state_right_msg.position, dtype=np.float32)
 
-                state_vec = np.zeros(14, dtype=np.float32)
+                # Each arm: 6 DOF + 1 gripper = 7 dimensions
+                state_vec = np.zeros(14, dtype=np.float32)  # 7 + 7 for dual arms
                 n_sl = min(7, q_robot_left.shape[0])
                 n_sr = min(7, q_robot_right.shape[0])
 
@@ -351,11 +372,50 @@ def process_single_bag(args):
                 action_vec[:n_al] = q_tele_left[:n_al]
                 action_vec[7 : 7 + n_ar] = q_tele_right[:n_ar]
 
+                end_pose_vec = np.zeros(
+                    14, dtype=np.float32
+                )  # 7 for left + 7 for right
+                if len(end_pose_left_times) > 0:
+                    idx_epl = nearest_idx(end_pose_left_times, t_frame)
+                    end_pose_left_msg = end_pose_left_msgs[idx_epl][1]
+                    # PoseStamped message: pose.position.{x,y,z} and pose.orientation.{x,y,z,w}
+                    if hasattr(end_pose_left_msg, "pose"):
+                        pose = end_pose_left_msg.pose
+                        end_pose_vec[0:3] = [
+                            pose.position.x,
+                            pose.position.y,
+                            pose.position.z,
+                        ]
+                        end_pose_vec[3:7] = [
+                            pose.orientation.x,
+                            pose.orientation.y,
+                            pose.orientation.z,
+                            pose.orientation.w,
+                        ]
+
+                if len(end_pose_right_times) > 0:
+                    idx_epr = nearest_idx(end_pose_right_times, t_frame)
+                    end_pose_right_msg = end_pose_right_msgs[idx_epr][1]
+                    if hasattr(end_pose_right_msg, "pose"):
+                        pose = end_pose_right_msg.pose
+                        end_pose_vec[7:10] = [
+                            pose.position.x,
+                            pose.position.y,
+                            pose.position.z,
+                        ]
+                        end_pose_vec[10:14] = [
+                            pose.orientation.x,
+                            pose.orientation.y,
+                            pose.orientation.z,
+                            pose.orientation.w,
+                        ]
+
                 frame = {
                     "observation.images.main": main_image,
                     "observation.images.secondary_0": wrist_left_image,
                     "observation.images.secondary_1": wrist_right_image,
                     "observation.state": state_vec,
+                    "observation.ee_pose": end_pose_vec,
                     "action": action_vec,
                     "task": task_name,
                 }
@@ -416,9 +476,29 @@ if __name__ == "__main__":
         },
         "observation.state": {
             "dtype": "float32",
-            "shape": (14,),
+            "shape": (14,),  # Each arm: 6 DOF + 1 gripper = 7, total 14
             "names": [f"left_joint_{i}" for i in range(7)]
             + [f"right_joint_{i}" for i in range(7)],
+        },
+        "observation.ee_pose": {
+            "dtype": "float32",
+            "shape": (14,),  # 7 per arm: [x, y, z, qx, qy, qz, qw]
+            "names": [
+                "left_pos_x",
+                "left_pos_y",
+                "left_pos_z",
+                "left_quat_x",
+                "left_quat_y",
+                "left_quat_z",
+                "left_quat_w",
+                "right_pos_x",
+                "right_pos_y",
+                "right_pos_z",
+                "right_quat_x",
+                "right_quat_y",
+                "right_quat_z",
+                "right_quat_w",
+            ],
         },
         "observation.images.main": {
             "dtype": "video",
