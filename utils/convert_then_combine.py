@@ -46,7 +46,7 @@ END_POSE_RIGHT = "/robot/arm_right/end_pose"
 # CONVERSION SETTINGS
 # ============================================================
 FPS = 10
-IMG_SIZE = (256, 256)
+IMG_SIZE = (224, 224)
 # TODO:
 NUM_WORKERS = 15  # Number of CPU cores to use
 
