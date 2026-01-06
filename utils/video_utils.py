@@ -30,14 +30,14 @@ from PIL import Image
 
 
 def get_safe_default_codec():
-    # Edited by Yifan
-    # if importlib.util.find_spec("torchcodec"):
-    #     return "torchcodec"
-    # else:
-    logging.warning(
-        "'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder"
-    )
-    return "pyav"
+    # Check if torchcodec is available
+    if importlib.util.find_spec("torchcodec"):
+        return "torchcodec"
+    else:
+        logging.warning(
+            "'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder"
+        )
+        return "pyav"
 
 
 def decode_video_frames(
@@ -60,25 +60,15 @@ def decode_video_frames(
 
     Currently supports torchcodec on cpu and pyav.
     """
-    # if backend is None:
-    #     backend = get_safe_default_codec()
-    # if backend == "torchcodec":
-    #     return decode_video_frames_torchcodec(video_path, timestamps, tolerance_s)
-    # elif backend in ["pyav", "video_reader"]:
-    #     return decode_video_frames_torchvision(video_path, timestamps, tolerance_s, backend)
-    # else:
-    #     raise ValueError(f"Unsupported video backend: {backend}")
-    # Edited by Yifan
     if backend is None:
         backend = get_safe_default_codec()
 
-    if backend not in ["pyav", "video_reader"]:
-        logging.warning(
-            f"Unsupported or disabled backend '{backend}', falling back to 'pyav'"
-        )
-        backend = "pyav"
-
-    return decode_video_frames_torchvision(video_path, timestamps, tolerance_s, backend)
+    if backend == "torchcodec":
+        return decode_video_frames_torchcodec(video_path, timestamps, tolerance_s)
+    elif backend in ["pyav", "video_reader"]:
+        return decode_video_frames_torchvision(video_path, timestamps, tolerance_s, backend)
+    else:
+        raise ValueError(f"Unsupported video backend: {backend}")
 
 
 def decode_video_frames_torchvision(

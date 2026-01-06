@@ -43,18 +43,25 @@ while true; do
         /robot/arm_right/pos_cmd \
         /teleop/arm_left/joint_states_single \
         /teleop/arm_right/joint_states_single \
-        /realsense_left/color/image_raw/compressed \
-        /realsense_right/color/image_raw/compressed \
+        /fisheye_left/image_raw/compressed \
+        /fisheye_right/image_raw/compressed \
+        /fisheye_left/camera_info \
+        /fisheye_right/camera_info \
         /realsense_top/color/image_raw/compressed \
-        /realsense_left/aligned_depth_to_color/image_raw/compressed \
-        /realsense_right/aligned_depth_to_color/image_raw/compressed \
         /realsense_top/aligned_depth_to_color/image_raw/compressed \
-        /realsense_left/color/camera_info \
-        /realsense_right/color/camera_info \
         /realsense_top/color/camera_info \
-        /realsense_left/aligned_depth_to_color/camera_info \
-        /realsense_right/aligned_depth_to_color/camera_info \
-        /realsense_top/aligned_depth_to_color/camera_info &
+        /realsense_top/aligned_depth_to_color/camera_info \
+        /wide_top/image_raw/compressed \
+        /wide_top/camera_info &
+        # Old realsense left/right cameras (commented out)
+        # /realsense_left/color/image_raw/compressed \
+        # /realsense_right/color/image_raw/compressed \
+        # /realsense_left/aligned_depth_to_color/image_raw/compressed \
+        # /realsense_right/aligned_depth_to_color/image_raw/compressed \
+        # /realsense_left/color/camera_info \
+        # /realsense_right/color/camera_info \
+        # /realsense_left/aligned_depth_to_color/camera_info \
+        # /realsense_right/aligned_depth_to_color/camera_info \
 
     BAG_PID=$!
 

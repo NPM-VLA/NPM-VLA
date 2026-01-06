@@ -3,10 +3,11 @@
 Check ROS bag file contents and display topic information.
 
 Usage:
-    python check_bag_info.py <path_to_bag_file>
+    python check_bag_info.py <path_to_bag_file> [--verbose] [--samples] [--play]
 
 Example:
     python check_bag_info.py "D:\\DESKTOP\\push_block_000.bag"
+    python check_bag_info.py "D:\\DESKTOP\\push_block_000.bag" --play
 """
 
 from rosbags.highlevel import AnyReader
@@ -15,6 +16,7 @@ import sys
 import os
 from collections import defaultdict
 import numpy as np
+import subprocess
 
 
 def format_bytes(bytes_size):
@@ -115,6 +117,71 @@ def analyze_message_content(msg):
                 }
 
     return stats
+
+
+def play_bag(bag_path, rate=1.0, start_time=None, duration=None, topics=None):
+    """
+    Play a ROS bag file using rosbag play command.
+
+    Args:
+        bag_path: Path to the .bag file
+        rate: Playback rate (default: 1.0 = real-time, 2.0 = 2x speed, etc.)
+        start_time: Start time in seconds from the beginning (default: None = from start)
+        duration: Duration to play in seconds (default: None = play entire bag)
+        topics: List of specific topics to play (default: None = play all topics)
+    """
+    if not os.path.exists(bag_path):
+        print(f"Error: File not found: {bag_path}")
+        return False
+
+    print(f"\n{'='*100}")
+    print(f"PLAYING BAG FILE")
+    print(f"{'='*100}")
+    print(f"File: {bag_path}")
+    print(f"Playback rate: {rate}x")
+    if start_time is not None:
+        print(f"Start time: {start_time}s from beginning")
+    if duration is not None:
+        print(f"Duration: {duration}s")
+    if topics:
+        print(f"Topics: {', '.join(topics)}")
+    else:
+        print(f"Topics: All topics")
+    print(f"\nPress Ctrl+C to stop playback")
+    print(f"{'='*100}\n")
+
+    # Build rosbag play command
+    cmd = ['rosbag', 'play', bag_path, f'--rate={rate}']
+
+    if start_time is not None:
+        cmd.append(f'--start={start_time}')
+
+    if duration is not None:
+        cmd.append(f'--duration={duration}')
+
+    if topics:
+        cmd.append('--topics')
+        cmd.extend(topics)
+
+    try:
+        # Run rosbag play command
+        result = subprocess.run(cmd, check=True)
+        print(f"\n{'='*100}")
+        print(f"Playback completed successfully")
+        print(f"{'='*100}\n")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"\nError playing bag file: {e}")
+        return False
+    except KeyboardInterrupt:
+        print(f"\n\n{'='*100}")
+        print(f"Playback interrupted by user")
+        print(f"{'='*100}\n")
+        return True
+    except FileNotFoundError:
+        print(f"\nError: 'rosbag' command not found. Make sure ROS is installed and sourced.")
+        print(f"On Ubuntu/Linux, source your ROS setup: source /opt/ros/<distro>/setup.bash")
+        return False
 
 
 def check_bag_info(bag_path, verbose=False, show_samples=False):
@@ -304,21 +371,64 @@ def check_bag_info(bag_path, verbose=False, show_samples=False):
 def main():
     """Main function."""
     if len(sys.argv) < 2:
-        print("Usage: python check_bag_info.py <path_to_bag_file> [--verbose] [--samples]")
+        print("Usage: python check_bag_info.py <path_to_bag_file> [OPTIONS]")
         print("\nOptions:")
-        print("  --verbose, -v    Show detailed message analysis")
-        print("  --samples, -s    Show sample messages from each topic")
-        print("\nExample:")
+        print("  --verbose, -v         Show detailed message analysis")
+        print("  --samples, -s         Show sample messages from each topic")
+        print("  --play, -p            Play the bag file using rosbag play")
+        print("  --rate RATE           Playback rate (default: 1.0, only with --play)")
+        print("  --start START         Start time in seconds (only with --play)")
+        print("  --duration DURATION   Duration in seconds (only with --play)")
+        print("\nExamples:")
         print('  python check_bag_info.py "D:\\DESKTOP\\push_block_000.bag"')
         print('  python check_bag_info.py "D:\\DESKTOP\\push_block_000.bag" --samples')
         print('  python check_bag_info.py "D:\\DESKTOP\\push_block_000.bag" --verbose --samples')
+        print('  python check_bag_info.py "D:\\DESKTOP\\push_block_000.bag" --play')
+        print('  python check_bag_info.py "D:\\DESKTOP\\push_block_000.bag" --play --rate 2.0')
+        print('  python check_bag_info.py "D:\\DESKTOP\\push_block_000.bag" --play --start 5 --duration 10')
         sys.exit(1)
 
     bag_path = sys.argv[1]
     verbose = '--verbose' in sys.argv or '-v' in sys.argv
     show_samples = '--samples' in sys.argv or '-s' in sys.argv
+    play = '--play' in sys.argv or '-p' in sys.argv
 
-    check_bag_info(bag_path, verbose=verbose, show_samples=show_samples)
+    # Parse playback options
+    rate = 1.0
+    start_time = None
+    duration = None
+
+    if '--rate' in sys.argv:
+        try:
+            rate_idx = sys.argv.index('--rate')
+            rate = float(sys.argv[rate_idx + 1])
+        except (IndexError, ValueError):
+            print("Error: --rate requires a numeric argument")
+            sys.exit(1)
+
+    if '--start' in sys.argv:
+        try:
+            start_idx = sys.argv.index('--start')
+            start_time = float(sys.argv[start_idx + 1])
+        except (IndexError, ValueError):
+            print("Error: --start requires a numeric argument")
+            sys.exit(1)
+
+    if '--duration' in sys.argv:
+        try:
+            duration_idx = sys.argv.index('--duration')
+            duration = float(sys.argv[duration_idx + 1])
+        except (IndexError, ValueError):
+            print("Error: --duration requires a numeric argument")
+            sys.exit(1)
+
+    # First check bag info (unless only --play is specified)
+    if not play or verbose or show_samples:
+        check_bag_info(bag_path, verbose=verbose, show_samples=show_samples)
+
+    # Then play if requested
+    if play:
+        play_bag(bag_path, rate=rate, start_time=start_time, duration=duration)
 
 
 if __name__ == '__main__':

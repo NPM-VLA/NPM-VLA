@@ -10,7 +10,7 @@ from rosbags.highlevel import AnyReader
 from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME, LeRobotDataset
 from huggingface_hub import hf_hub_download, list_repo_files
 
-REPO_NAME = "zeno/sweep2E_v1"
+REPO_NAME = "zeno/sweep_to_E"
 
 # ============================================================
 # DATA SOURCE CONFIGURATION
@@ -20,25 +20,29 @@ REPO_NAME = "zeno/sweep2E_v1"
 DATA_SOURCE = "huggingface"  # or "local"
 
 # Local data directory (used when DATA_SOURCE="local")
-DATA_ROOT = Path("/home/jovyan/workspace/openpi/npm_sweep2E_data")
+DATA_ROOT = Path(
+    "/home/zeno-yifan/NPM-Project/NPM-Ros/piper_ros/data_collect/sweep_to_E"
+)
 
 # Hugging Face dataset repository (used when DATA_SOURCE="huggingface")
-HF_DATASET_REPO = "Anlorla/sweep2E"
+HF_DATASET_REPO = "Anlorla/sweep_to_E"
 
-# List of task names to process (each task folder contains multiple .bag files)
-TASK_NAMES = [
-    "Push the block to the right and then move both arms back to the home pose.",
-]
+# Task description/label (used as metadata, NOT as a path)
+# This is decoupled from the data path - bag files are read directly from DATA_ROOT
+TASK_LABEL = (
+    "<skill>sweep<skill> Sweep red beads into letter 'E' shape inside the masked squre."
+)
 
 # ROS topics
+# Camera topics updated for fisheye cameras and wide top camera
 CAM_MAIN = "/realsense_top/color/image_raw/compressed"
-CAM_WRIST_LEFT = "/realsense_left/color/image_raw/compressed"
-CAM_WRIST_RIGHT = "/realsense_right/color/image_raw/compressed"
+CAM_WRIST_LEFT = "/fisheye_left/image_raw/compressed"  # Changed from realsense_left
+CAM_WRIST_RIGHT = "/fisheye_right/image_raw/compressed"  # Changed from realsense_right
+CAM_WIDE_TOP = "/wide_top/image_raw/compressed"
 STATE_LEFT = "/robot/arm_left/joint_states_single"
 STATE_RIGHT = "/robot/arm_right/joint_states_single"
 ACTION_LEFT = "/teleop/arm_left/joint_states_single"
 ACTION_RIGHT = "/teleop/arm_right/joint_states_single"
-
 END_POSE_LEFT = "/robot/arm_left/end_pose"
 END_POSE_RIGHT = "/robot/arm_right/end_pose"
 
@@ -46,7 +50,7 @@ END_POSE_RIGHT = "/robot/arm_right/end_pose"
 # CONVERSION SETTINGS
 # ============================================================
 FPS = 10
-IMG_SIZE = (224, 224)
+IMG_SIZE = (640, 480)
 # TODO:
 NUM_WORKERS = 15  # Number of CPU cores to use
 
@@ -71,42 +75,39 @@ def nearest_idx(times, t):
     return idx if abs(after - t) < abs(t - before) else idx - 1
 
 
-def collect_bag_files_local(task_name):
-    """Collect all .bag files from local directory."""
-    task_dir = DATA_ROOT / task_name
-    if not task_dir.exists():
-        print(f"Warning: Task directory not found: {task_dir}")
+def collect_bag_files_local():
+    """Collect all .bag files from local directory (DATA_ROOT)."""
+    if not DATA_ROOT.exists():
+        print(f"Warning: Data directory not found: {DATA_ROOT}")
         return []
 
-    bag_files = sorted(task_dir.glob("*.bag"))
+    bag_files = sorted(DATA_ROOT.glob("*.bag"))
     if not bag_files:
-        print(f"Warning: No .bag files found in {task_dir}")
+        print(f"Warning: No .bag files found in {DATA_ROOT}")
     else:
-        print(f"Found {len(bag_files)} bag file(s) for task '{task_name}':")
+        print(f"Found {len(bag_files)} bag file(s) in {DATA_ROOT}:")
         for bag_file in bag_files:
             print(f"  - {bag_file.name}")
 
     return bag_files
 
 
-def collect_bag_files_huggingface(task_name):
+def collect_bag_files_huggingface():
     """Collect all .bag files from Hugging Face dataset repository."""
     print(f"Fetching file list from Hugging Face: {HF_DATASET_REPO}")
 
     try:
         all_files = list_repo_files(repo_id=HF_DATASET_REPO, repo_type="dataset")
 
-        # Filter for .bag files for this task
+        # Filter for .bag files
         bag_filenames = [f for f in all_files if f.endswith(".bag")]
         bag_filenames = sorted(bag_filenames)
 
         if not bag_filenames:
-            print(
-                f"Warning: No .bag files found for task '{task_name}' in {HF_DATASET_REPO}"
-            )
+            print(f"Warning: No .bag files found in {HF_DATASET_REPO}")
             return []
 
-        print(f"Found {len(bag_filenames)} bag file(s) for task '{task_name}':")
+        print(f"Found {len(bag_filenames)} bag file(s):")
         for filename in bag_filenames:
             print(f"  - {filename}")
 
@@ -133,12 +134,12 @@ def collect_bag_files_huggingface(task_name):
         return []
 
 
-def collect_bag_files(task_name):
+def collect_bag_files():
     """Dispatch between local / Hugging Face data source."""
     if DATA_SOURCE == "huggingface":
-        return collect_bag_files_huggingface(task_name)
+        return collect_bag_files_huggingface()
     elif DATA_SOURCE == "local":
-        return collect_bag_files_local(task_name)
+        return collect_bag_files_local()
     else:
         raise ValueError(
             f"Unknown DATA_SOURCE: {DATA_SOURCE}. Must be 'local' or 'huggingface'"
@@ -165,6 +166,7 @@ def process_single_bag(args):
                 CAM_MAIN,
                 CAM_WRIST_LEFT,
                 CAM_WRIST_RIGHT,
+                CAM_WIDE_TOP,
                 STATE_LEFT,
                 STATE_RIGHT,
                 ACTION_LEFT,
@@ -194,6 +196,7 @@ def process_single_bag(args):
             cam_main_msgs = topic_to_msgs[CAM_MAIN]
             cam_wrist_left_msgs = topic_to_msgs[CAM_WRIST_LEFT]
             cam_wrist_right_msgs = topic_to_msgs[CAM_WRIST_RIGHT]
+            cam_wide_top_msgs = topic_to_msgs[CAM_WIDE_TOP]
             state_left_msgs = topic_to_msgs[STATE_LEFT]
             state_right_msgs = topic_to_msgs[STATE_RIGHT]
             action_left_msgs = topic_to_msgs[ACTION_LEFT]
@@ -203,7 +206,12 @@ def process_single_bag(args):
             end_pose_left_msgs = topic_to_msgs[END_POSE_LEFT]
             end_pose_right_msgs = topic_to_msgs[END_POSE_RIGHT]
 
-            if not cam_main_msgs or not cam_wrist_left_msgs or not cam_wrist_right_msgs:
+            if (
+                not cam_main_msgs
+                or not cam_wrist_left_msgs
+                or not cam_wrist_right_msgs
+                or not cam_wide_top_msgs
+            ):
                 with lock:
                     print(
                         f"[Bag {bag_idx}/{total_bags}] Warning: Missing camera data, skipping"
@@ -238,6 +246,7 @@ def process_single_bag(args):
             wrist_right_times = np.array(
                 [t for t, _ in cam_wrist_right_msgs], dtype=np.int64
             )
+            wide_top_times = np.array([t for t, _ in cam_wide_top_msgs], dtype=np.int64)
 
             end_pose_left_times = (
                 np.array([t for t, _ in end_pose_left_msgs], dtype=np.int64)
@@ -255,6 +264,7 @@ def process_single_bag(args):
                 main_duration = (cam_main_times[-1] - cam_main_times[0]) / 1e9
                 left_duration = (wrist_left_times[-1] - wrist_left_times[0]) / 1e9
                 right_duration = (wrist_right_times[-1] - wrist_right_times[0]) / 1e9
+                wide_duration = (wide_top_times[-1] - wide_top_times[0]) / 1e9
                 print(
                     f"    Main camera:   {main_duration:.2f} seconds ({len(cam_main_msgs)} frames)"
                 )
@@ -264,16 +274,21 @@ def process_single_bag(args):
                 print(
                     f"    Right wrist:   {right_duration:.2f} seconds ({len(cam_wrist_right_msgs)} frames)"
                 )
+                print(
+                    f"    Wide top:      {wide_duration:.2f} seconds ({len(cam_wide_top_msgs)} frames)"
+                )
 
             t_start = max(
                 cam_main_times[0],
                 wrist_left_times[0],
                 wrist_right_times[0],
+                wide_top_times[0],
             )
             t_end = min(
                 cam_main_times[-1],
                 wrist_left_times[-1],
                 wrist_right_times[-1],
+                wide_top_times[-1],
             )
 
             if t_end <= t_start:
@@ -334,6 +349,7 @@ def process_single_bag(args):
                 idx_main = nearest_idx(cam_main_times, t_frame)
                 idx_wl = nearest_idx(wrist_left_times, t_frame)
                 idx_wr = nearest_idx(wrist_right_times, t_frame)
+                idx_wt = nearest_idx(wide_top_times, t_frame)
 
                 main_image = decode_compressed_image(cam_main_msgs[idx_main][1])
                 wrist_left_image = decode_compressed_image(
@@ -342,6 +358,7 @@ def process_single_bag(args):
                 wrist_right_image = decode_compressed_image(
                     cam_wrist_right_msgs[idx_wr][1]
                 )
+                wide_top_image = decode_compressed_image(cam_wide_top_msgs[idx_wt][1])
 
                 idx_sl = nearest_idx(state_left_times, t_frame)
                 idx_sr = nearest_idx(state_right_times, t_frame)
@@ -414,6 +431,7 @@ def process_single_bag(args):
                     "observation.images.main": main_image,
                     "observation.images.secondary_0": wrist_left_image,
                     "observation.images.secondary_1": wrist_right_image,
+                    "observation.images.secondary_2": wide_top_image,
                     "observation.state": state_vec,
                     "observation.ee_pose": end_pose_vec,
                     "action": action_vec,
@@ -515,6 +533,11 @@ if __name__ == "__main__":
             "shape": (IMG_SIZE[1], IMG_SIZE[0], 3),
             "names": ["height", "width", "channels"],
         },
+        "observation.images.secondary_2": {
+            "dtype": "video",
+            "shape": (IMG_SIZE[1], IMG_SIZE[0], 3),
+            "names": ["height", "width", "channels"],
+        },
     }
 
     dataset = LeRobotDataset.create(
@@ -527,27 +550,26 @@ if __name__ == "__main__":
         image_writer_processes=4,
     )
 
-    for task_name in TASK_NAMES:
-        print(f"\n{'=' * 60}")
-        print(f"Processing task: {task_name}")
-        print(f"{'=' * 60}")
+    print(f"\n{'=' * 60}")
+    print(f"Processing task: {TASK_LABEL}")
+    print(f"Data path: {DATA_ROOT}")
+    print(f"{'=' * 60}")
 
-        bag_files = collect_bag_files(task_name)
-        total_bags = len(bag_files)
+    bag_files = collect_bag_files()
+    total_bags = len(bag_files)
 
-        if total_bags == 0:
-            print("No bag files to process.")
-            continue
-
+    if total_bags == 0:
+        print("No bag files to process.")
+    else:
         # Create shared objects for multiprocessing
         manager = Manager()
         progress_dict = manager.dict()
         progress_dict["completed"] = 0
         lock = manager.Lock()
 
-        # Prepare arguments for each bag file
+        # Prepare arguments for each bag file (use TASK_LABEL for metadata)
         bag_args = [
-            (bag_path, task_name, bag_idx, total_bags, progress_dict, lock)
+            (bag_path, TASK_LABEL, bag_idx, total_bags, progress_dict, lock)
             for bag_idx, bag_path in enumerate(bag_files, 1)
         ]
 

@@ -36,18 +36,28 @@ TOPICS=(
   /robot/arm_right/pos_cmd
   /teleop/arm_left/joint_states_single
   /teleop/arm_right/joint_states_single
-  /realsense_left/color/image_raw/compressed
-  /realsense_right/color/image_raw/compressed
+  # New fisheye cameras (replacing realsense left/right)
+  /fisheye_left/image_raw/compressed
+  /fisheye_right/image_raw/compressed
+  /fisheye_left/camera_info
+  /fisheye_right/camera_info
+  # Realsense top camera (unchanged)
   /realsense_top/color/image_raw/compressed
-  /realsense_left/aligned_depth_to_color/image_raw/compressed
-  /realsense_right/aligned_depth_to_color/image_raw/compressed
   /realsense_top/aligned_depth_to_color/image_raw/compressed
-  /realsense_left/color/camera_info
-  /realsense_right/color/camera_info
   /realsense_top/color/camera_info
-  /realsense_left/aligned_depth_to_color/camera_info
-  /realsense_right/aligned_depth_to_color/camera_info
   /realsense_top/aligned_depth_to_color/camera_info
+  # New wide top camera
+  /wide_top/image_raw/compressed
+  /wide_top/camera_info
+  # Old realsense left/right cameras (commented out)
+  # /realsense_left/color/image_raw/compressed
+  # /realsense_right/color/image_raw/compressed
+  # /realsense_left/aligned_depth_to_color/image_raw/compressed
+  # /realsense_right/aligned_depth_to_color/image_raw/compressed
+  # /realsense_left/color/camera_info
+  # /realsense_right/color/camera_info
+  # /realsense_left/aligned_depth_to_color/camera_info
+  # /realsense_right/aligned_depth_to_color/camera_info
 )
 
 echo "=== Alternating rosbag episodic recorder (RECOVER <-> SWEEP) ==="

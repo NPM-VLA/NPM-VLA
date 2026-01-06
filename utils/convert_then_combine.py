@@ -31,9 +31,11 @@ HF_DATASET_REPOS_WITH_TASKS = [
 ]
 
 # ROS topics
+# Camera topics updated for fisheye cameras and wide top camera
 CAM_MAIN = "/realsense_top/color/image_raw/compressed"
-CAM_WRIST_LEFT = "/realsense_left/color/image_raw/compressed"
-CAM_WRIST_RIGHT = "/realsense_right/color/image_raw/compressed"
+CAM_WRIST_LEFT = "/fisheye_left/image_raw/compressed"  # Changed from realsense_left
+CAM_WRIST_RIGHT = "/fisheye_right/image_raw/compressed"  # Changed from realsense_right
+CAM_WIDE_TOP = "/wide_top/image_raw/compressed"
 STATE_LEFT = "/robot/arm_left/joint_states_single"
 STATE_RIGHT = "/robot/arm_right/joint_states_single"
 ACTION_LEFT = "/teleop/arm_left/joint_states_single"
@@ -178,6 +180,7 @@ def process_single_bag(args):
                 CAM_MAIN,
                 CAM_WRIST_LEFT,
                 CAM_WRIST_RIGHT,
+                CAM_WIDE_TOP,
                 STATE_LEFT,
                 STATE_RIGHT,
                 ACTION_LEFT,
@@ -207,6 +210,7 @@ def process_single_bag(args):
             cam_main_msgs = topic_to_msgs[CAM_MAIN]
             cam_wrist_left_msgs = topic_to_msgs[CAM_WRIST_LEFT]
             cam_wrist_right_msgs = topic_to_msgs[CAM_WRIST_RIGHT]
+            cam_wide_top_msgs = topic_to_msgs[CAM_WIDE_TOP]
             state_left_msgs = topic_to_msgs[STATE_LEFT]
             state_right_msgs = topic_to_msgs[STATE_RIGHT]
             action_left_msgs = topic_to_msgs[ACTION_LEFT]
@@ -216,7 +220,7 @@ def process_single_bag(args):
             end_pose_left_msgs = topic_to_msgs[END_POSE_LEFT]
             end_pose_right_msgs = topic_to_msgs[END_POSE_RIGHT]
 
-            if not cam_main_msgs or not cam_wrist_left_msgs or not cam_wrist_right_msgs:
+            if not cam_main_msgs or not cam_wrist_left_msgs or not cam_wrist_right_msgs or not cam_wide_top_msgs:
                 with lock:
                     print(
                         f"[Bag {bag_idx}/{total_bags}] Warning: Missing camera data, skipping"
@@ -251,6 +255,9 @@ def process_single_bag(args):
             wrist_right_times = np.array(
                 [t for t, _ in cam_wrist_right_msgs], dtype=np.int64
             )
+            wide_top_times = np.array(
+                [t for t, _ in cam_wide_top_msgs], dtype=np.int64
+            )
 
             end_pose_left_times = (
                 np.array([t for t, _ in end_pose_left_msgs], dtype=np.int64)
@@ -268,6 +275,7 @@ def process_single_bag(args):
                 main_duration = (cam_main_times[-1] - cam_main_times[0]) / 1e9
                 left_duration = (wrist_left_times[-1] - wrist_left_times[0]) / 1e9
                 right_duration = (wrist_right_times[-1] - wrist_right_times[0]) / 1e9
+                wide_duration = (wide_top_times[-1] - wide_top_times[0]) / 1e9
                 print(
                     f"    Main camera:   {main_duration:.2f} seconds ({len(cam_main_msgs)} frames)"
                 )
@@ -277,16 +285,21 @@ def process_single_bag(args):
                 print(
                     f"    Right wrist:   {right_duration:.2f} seconds ({len(cam_wrist_right_msgs)} frames)"
                 )
+                print(
+                    f"    Wide top:      {wide_duration:.2f} seconds ({len(cam_wide_top_msgs)} frames)"
+                )
 
             t_start = max(
                 cam_main_times[0],
                 wrist_left_times[0],
                 wrist_right_times[0],
+                wide_top_times[0],
             )
             t_end = min(
                 cam_main_times[-1],
                 wrist_left_times[-1],
                 wrist_right_times[-1],
+                wide_top_times[-1],
             )
 
             if t_end <= t_start:
@@ -347,6 +360,7 @@ def process_single_bag(args):
                 idx_main = nearest_idx(cam_main_times, t_frame)
                 idx_wl = nearest_idx(wrist_left_times, t_frame)
                 idx_wr = nearest_idx(wrist_right_times, t_frame)
+                idx_wt = nearest_idx(wide_top_times, t_frame)
 
                 main_image = decode_compressed_image(cam_main_msgs[idx_main][1])
                 wrist_left_image = decode_compressed_image(
@@ -354,6 +368,9 @@ def process_single_bag(args):
                 )
                 wrist_right_image = decode_compressed_image(
                     cam_wrist_right_msgs[idx_wr][1]
+                )
+                wide_top_image = decode_compressed_image(
+                    cam_wide_top_msgs[idx_wt][1]
                 )
 
                 idx_sl = nearest_idx(state_left_times, t_frame)
@@ -425,6 +442,7 @@ def process_single_bag(args):
                     "observation.images.main": main_image,
                     "observation.images.secondary_0": wrist_left_image,
                     "observation.images.secondary_1": wrist_right_image,
+                    "observation.images.secondary_2": wide_top_image,
                     "observation.state": state_vec,
                     "observation.ee_pose": end_pose_vec,
                     "action": action_vec,
@@ -522,6 +540,11 @@ if __name__ == "__main__":
             "names": ["height", "width", "channels"],
         },
         "observation.images.secondary_1": {
+            "dtype": "video",
+            "shape": (IMG_SIZE[1], IMG_SIZE[0], 3),
+            "names": ["height", "width", "channels"],
+        },
+        "observation.images.secondary_2": {
             "dtype": "video",
             "shape": (IMG_SIZE[1], IMG_SIZE[0], 3),
             "names": ["height", "width", "channels"],
