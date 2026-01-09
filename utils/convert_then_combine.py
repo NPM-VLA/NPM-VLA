@@ -7,10 +7,10 @@ from multiprocessing import Pool, Manager, Lock
 from functools import partial
 
 from rosbags.highlevel import AnyReader
-from lerobot.datasets.lerobot_dataset import HF_LEROBOT_HOME, LeRobotDataset
+from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME, LeRobotDataset
 from huggingface_hub import hf_hub_download, list_repo_files
 
-REPO_NAME = "zeno/push_block_dual"
+REPO_NAME = "Anlorla/sweep_to_E_and_recover"
 
 # ============================================================
 # DATA SOURCE CONFIGURATION
@@ -25,9 +25,14 @@ DATA_ROOT = Path("/home/jovyan/workspace/openpi/push_block_dual_data")
 
 # Mapping from Hugging Face repo to task name
 HF_DATASET_REPOS_WITH_TASKS = [
-    ("Anlorla/sweep2yellow", "Sweep lego blocks to yellow cross marker."),
-    ("Anlorla/sweep2red", "Sweep lego blocks to red cross marker."),
-    ("Anlorla/sweep2green", "Sweep lego blocks to green cross marker."),
+    (
+        "Anlorla/sweep_to_E",
+        "<skill>sweep<skill> Sweep red beads into letter 'E' shape inside the masked squre.",
+    ),
+    (
+        "Anlorla/recover_from_E",
+        "<skill>recover<skill> Gather the red beads into a dense, contiguous pile inside the marked square with minimal gaps.",
+    ),
 ]
 
 # ROS topics
@@ -220,7 +225,12 @@ def process_single_bag(args):
             end_pose_left_msgs = topic_to_msgs[END_POSE_LEFT]
             end_pose_right_msgs = topic_to_msgs[END_POSE_RIGHT]
 
-            if not cam_main_msgs or not cam_wrist_left_msgs or not cam_wrist_right_msgs or not cam_wide_top_msgs:
+            if (
+                not cam_main_msgs
+                or not cam_wrist_left_msgs
+                or not cam_wrist_right_msgs
+                or not cam_wide_top_msgs
+            ):
                 with lock:
                     print(
                         f"[Bag {bag_idx}/{total_bags}] Warning: Missing camera data, skipping"
@@ -255,9 +265,7 @@ def process_single_bag(args):
             wrist_right_times = np.array(
                 [t for t, _ in cam_wrist_right_msgs], dtype=np.int64
             )
-            wide_top_times = np.array(
-                [t for t, _ in cam_wide_top_msgs], dtype=np.int64
-            )
+            wide_top_times = np.array([t for t, _ in cam_wide_top_msgs], dtype=np.int64)
 
             end_pose_left_times = (
                 np.array([t for t, _ in end_pose_left_msgs], dtype=np.int64)
@@ -369,9 +377,7 @@ def process_single_bag(args):
                 wrist_right_image = decode_compressed_image(
                     cam_wrist_right_msgs[idx_wr][1]
                 )
-                wide_top_image = decode_compressed_image(
-                    cam_wide_top_msgs[idx_wt][1]
-                )
+                wide_top_image = decode_compressed_image(cam_wide_top_msgs[idx_wt][1])
 
                 idx_sl = nearest_idx(state_left_times, t_frame)
                 idx_sr = nearest_idx(state_right_times, t_frame)
@@ -402,7 +408,9 @@ def process_single_bag(args):
                 action_vec[7 : 7 + n_ar] = q_tele_right[:n_ar]
 
                 # Process end effector poses (if available)
-                end_pose_vec = np.zeros(14, dtype=np.float32)  # 7 for left + 7 for right
+                end_pose_vec = np.zeros(
+                    14, dtype=np.float32
+                )  # 7 for left + 7 for right
                 if len(end_pose_left_times) > 0:
                     idx_epl = nearest_idx(end_pose_left_times, t_frame)
                     end_pose_left_msg = end_pose_left_msgs[idx_epl][1]

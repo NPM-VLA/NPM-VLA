@@ -55,7 +55,7 @@ utils/video_utils.py
 
 > **Why?** This modification resolves issues with torchvision and pyav video encoding/decoding in the LeRobot dataset pipeline.
 
-### Data Collection (Teleoperation)pya
+### Data Collection (Teleoperation)
 
 Before collecting data through teleoperation, ensure proper network configuration between the two machines.
 
@@ -185,12 +185,7 @@ After conversion, the LeRobot dataset will be organized as follows:
 **Data Specifications**:
 
 - `action`: 14-dimensional float32 vector (left arm 7 DOF + right arm 7 DOF)
-- `observation.state`: 14-dimensional float32 vector (left arm 7 joints + right arm 7 joints)
-- `observation.images.main`: Main camera (realsense_top)
-- `observation.images.secondary_0`: Left wrist camera (fisheye_left)
-- `observation.images.secondary_1`: Right wrist camera (fisheye_right)
-- `observation.images.secondary_2`: (Optional) Wide top camera - enabled via `use_fourth_image=True`
-- `observation.images.sweep_mask`: (Optional) Sweep mask for sweep tasks - enabled via `use_sweep_mask=True`
+- `observation.state`: 16-dimensional float32 vector (left arm 8 joints + right arm 8 joints)
 - Video resolution: 256×256×3 RGB @ 10 FPS
 - Format: Parquet files for tabular data, MP4 for videos
 
@@ -224,66 +219,43 @@ huggingface-cli download --resume-download Anlorla/sweep2cross_lerobot21_masked_
 
 Before training, you need to configure your training settings in `src/openpi/training/config.py`.
 
-#### Available Training Configs
-
-| Config Name         | Model | Cameras | Description                           |
-| ------------------- | ----- | ------- | ------------------------------------- |
-| `pi0_piper`       | Pi0   | 3       | Pi0 model with 3 cameras              |
-| `pi05_piper`      | Pi0.5 | 3       | Pi0.5 model with 3 cameras            |
-| `pi05_piper_4cam` | Pi0.5 | 4       | Pi0.5 with wide_top as 4th camera     |
-| `pi05_piper_mask` | Pi0.5 | 3+mask  | Pi0.5 with sweep_mask for sweep tasks |
-| `pi05_piper_lora` | Pi0.5 | 3       | Pi0.5 LoRA fine-tuning (low memory)   |
-
 #### Create Your Custom TrainConfig
 
-You can copy an existing configuration and create your own:
+You can copy an existing configuration (like `pi0_npm` or `pi05_npm`) and create your own:
 
 ```python
-# In src/openpi/training/config.py, add to _CONFIGS list:
+ # In src/openpi/training/config.py, add to _CONFIGS list:
 
 TrainConfig(
-    name="pi05_piper_4cam",  # ** Change this to your custom config name
+    name="pi0_npm",  # ** Change this to your custom config name
+    # Dual-arm robot with 14-dim actions (7 per arm) and 16-dim state (8 per arm)
     model=pi0_config.Pi0Config(
-        pi05=True,  # ** Set True for Pi0.5, False for Pi0 base model
-        action_horizon=25,  # ** Number of future action steps to predict
+        pi05=False, # ** Set True for Pi0.5, False for Pi0 base model
+        action_horizon=10, # ** Number of future action steps to predict (typically 10-20)
         discrete_state_input=False,
-        max_token_len=200,  # ** Increase for 4 images
     ),
-    data=LeRobotPiperDataConfig(
-        repo_id="your-username/your-dataset",  # ** Your HuggingFace dataset repository ID
+    data=LeRobotZenoDataConfig(
+        repo_id="Anlorla/sweep2E_alarm_v1_primitives_200",  # ** Your HuggingFace dataset repository ID
         base_config=DataConfig(
             prompt_from_task=True,
-            action_sequence_keys=("action",),
+            action_sequence_keys=("action",),  # Specify the action key from dataset
         ),
         extra_delta_transform=False,
-        use_fourth_image=True,   # ** Enable wide_top as 4th camera
-        use_sweep_mask=False,    # ** Enable sweep_mask as 4th image (for sweep tasks)
     ),
-    batch_size=256,  # ** Adjust based on GPU memory
-    lr_schedule=_optimizer.CosineDecaySchedule(
-        warmup_steps=10_000,
+    batch_size=32, # ** Adjust based on GPU memory (16/32/64)
+    lr_schedule=_optimizer.CosineDecaySchedule( # ** Learning rate schedule configuration
+        warmup_steps=10_000, # ** See warmup_steps guidelines below
         peak_lr=5e-5,
         decay_steps=1_000_000,
         decay_lr=5e-5,
     ),
     optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
     ema_decay=0.999,
-    weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
-    num_train_steps=30_000,
+    weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+    pytorch_weight_path=None,  # not use for now
+    num_train_steps=12_000, # ** Total training steps (depends on dataset size and desired epochs)
 ),
 ```
-
-#### Data Configuration Options
-
-The `LeRobotPiperDataConfig` supports the following flags:
-
-| Flag                      | Default   | Description                                      |
-| ------------------------- | --------- | ------------------------------------------------ |
-| `use_fourth_image`      | `False` | Enable wide_top camera as 4th image input        |
-| `use_sweep_mask`        | `False` | Enable sweep_mask as 4th image (for sweep tasks) |
-| `extra_delta_transform` | `False` | Apply delta transform to joint actions           |
-
-**Note:** `use_fourth_image` and `use_sweep_mask` are mutually exclusive - only enable one at a time.
 
 #### Key Configuration Parameters
 
@@ -592,82 +564,73 @@ uv run scripts/serve_policy.py policy:checkpoint \
 
 See the [Inference](#inference) section for more details on policy server configuration.
 
-### 1. Configure Launch Files
+### 1. Configure Control Mode
 
-Before starting the robot, you need to configure the ROS launch files to switch between different operation modes: teleoperation, VLA testing with gripper, or VLA testing without gripper.
+Before starting the robot, you need to switch between different operation modes: teleoperation, VLA testing with gripper, or VLA testing without gripper.
 
-**Configuration File Location:**
+#### Quick Mode Switching (Recommended)
 
-Edit the main configuration file:
+Use the `switch_mode.py` script to easily switch between modes:
 
 ```bash
-vim /home/zeno/piper_ros/src/zeno-wholebody-teleop/common/piper_ctrl/config/piper_dual.yaml
+cd openpi/scripts
+
+# Check current mode
+python3 switch_mode.py -s
+
+# Interactive mode selection
+python3 switch_mode.py
+
+# Direct mode switching
+python3 switch_mode.py 1   # VLA Testing with Gripper
+python3 switch_mode.py 2   # VLA Testing without Gripper
+python3 switch_mode.py 3   # Teleoperation Mode
 ```
 
-**Configuration Modes:**
+**Available Modes:**
 
-The key configuration section is the `remap` settings for each arm. Below are three common modes (using right arm as example):
+| Mode | Name | Arm Control | Gripper Control | Use Case |
+|------|------|-------------|-----------------|----------|
+| 1 | VLA with Gripper | VLA | VLA | Full VLA policy control |
+| 2 | VLA without Gripper | VLA | Separate | VLA arm control only |
+| 3 | Teleoperation | Teleop | Teleop | Data collection/Manual control |
 
-#### Mode 1: VLA Testing with Gripper
+#### Manual Configuration (Alternative)
 
-Use this mode when testing the VLA policy with gripper control:
+If you prefer manual configuration, edit the YAML file directly:
 
+```bash
+vim /path/to/piper_ros/src/zeno-wholebody-teleop/common/piper_ctrl/config/piper_dual.yaml
+```
+
+The key configuration section is the `remap` settings for each arm (using right arm as example):
+
+**Mode 1: VLA Testing with Gripper**
 ```yaml
 remap:
   joint_pos_cmd_to: "/robot/arm_right/vla_joint_cmd"
-  gripper_pos_cmd_to: "/robot/arm_right/vla_joint_cmd"    # Gripper controlled by VLA
-  # gripper_pos_cmd_to: "/robot/arm_right/joint_pos_cmd"  # Commented out
+  gripper_pos_cmd_to: "/robot/arm_right/vla_joint_cmd"
 ```
 
-**What this does:** Both arm joints and gripper are controlled by the VLA policy output on `/robot/arm_right/vla_joint_cmd` topic.
-
-#### Mode 2: VLA Testing without Gripper
-
-Use this mode when testing the VLA policy without gripper control (gripper controlled separately):
-
+**Mode 2: VLA Testing without Gripper**
 ```yaml
 remap:
   joint_pos_cmd_to: "/robot/arm_right/vla_joint_cmd"
-  gripper_pos_cmd_to: "/robot/arm_right/joint_pos_cmd"    # Gripper controlled separately
-  # gripper_pos_cmd_to: "/robot/arm_right/vla_joint_cmd"  # Commented out
+  gripper_pos_cmd_to: "/robot/arm_right/joint_pos_cmd"
 ```
 
-**What this does:** Arm joints are controlled by VLA policy, but the gripper is controlled separately through the standard control interface.
-
-#### Mode 3: Teleoperation Mode
-
-Use this mode for manual teleoperation (data collection or manual control):
-
+**Mode 3: Teleoperation Mode**
 ```yaml
 remap:
-  # joint_pos_cmd_to: "/robot/arm_right/vla_joint_cmd"     # Commented out
-  # gripper_pos_cmd_to: "/robot/arm_right/joint_pos_cmd"   # Commented out
-  # gripper_pos_cmd_to: "/robot/arm_right/vla_joint_cmd"   # Commented out
   joint_pos_cmd_to: "/teleop/arm_right/joint_states_single"
   gripper_pos_cmd_to: "/teleop/arm_right/joint_states_single"
 ```
 
-**What this does:** Both arm and gripper are controlled by teleoperation commands for manual operation.
-
 **Important Notes:**
 
-- Apply the same configuration for both left and right arms in the file
-- **⚠️ CRITICAL: After modifying the YAML configuration, you MUST source the workspace before launching:**
-  ```bash
-  source devel/setup.bash
-  ```
-
-  Without sourcing, the configuration changes will not take effect!
-- Remember to restart the ROS nodes after modifying the configuration
+- Apply the same configuration for both left and right arms
+- **⚠️ CRITICAL: After modifying the YAML configuration, you MUST restart the ROS nodes for changes to take effect**
 - For dual-arm tasks, ensure both arms use consistent control modes
-
-**Quick Reference:**
-
-| Mode                | Arm Control | Gripper Control | Use Case                       |
-| ------------------- | ----------- | --------------- | ------------------------------ |
-| VLA with Gripper    | VLA         | VLA             | Full VLA policy control        |
-| VLA without Gripper | VLA         | Separate        | VLA arm control only           |
-| Teleoperation       | Teleop      | Teleop          | Data collection/Manual control |
 
 ### 2. Start Robot Control System
 
@@ -677,24 +640,30 @@ Source the ROS workspace and launch the robot control nodes:
 # Source the workspace
 source devel/setup.bash
 
+# Setup CAN ports
 bash can_activate.sh can_left 1000000 "1-8.3:1.0"
 bash can_activate.sh can_right 1000000 "1-8.4:1.0"
 
 export ROS_MASTER_URI=http://localhost:11311
 
 # Launch the robot with all sensors
-roslaunch robot_setup start_robot_all.launch ranger_can_port:=can0 left_can_port:=can_left right_can_port:=can_right enable_ranger:=false enable_paddle2ranger:=false enable_dual_arm:=true enable_cameras:=true enable_rviz:=true enable_gravity_compensation:=false camera_left_usb_port:=2-1 camera_right_usb_port:=2-8 camera_top_usb_port:=2-2
+roslaunch robot_setup start_robot_all.launch \
+  left_can_port:=can_left \
+  right_can_port:=can_right \
+  enable_dual_arm:=true \
+  enable_cameras:=true \
+  enable_rviz:=true \
+  enable_handeye_tf:=true
 ```
 
 **Parameters:**
 
-- `ranger_can_port`: CAN port for ranger base (can0)
 - `left_can_port`: CAN port for left arm (can_left)
 - `right_can_port`: CAN port for right arm (can_right)
 - `enable_dual_arm`: Enable dual-arm control
 - `enable_cameras`: Enable all RealSense cameras
 - `enable_rviz`: Launch RViz for visualization
-- `camera_*_usb_port`: USB ports for each camera
+- `enable_handeye_tf`: Enable hand-eye TF publishing
 
 ### 3. Run VLA Policy Controller
 
