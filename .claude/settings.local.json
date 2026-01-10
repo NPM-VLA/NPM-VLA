@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run python:*)",
+      "Bash(python -c:*)",
+      "WebSearch"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

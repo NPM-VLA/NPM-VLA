@@ -318,6 +318,11 @@ uv run python scripts/compute_norm_stats.py --config-name pi05_npm
 ```bash
 cd openpi
 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_npm --exp-name=sweep2cross --overwrite
+
+# multi datasets:
+  XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_piper \
+      --exp-name=sweep_to_U_and_recover \
+      --data.repo_ids='["Anlorla/sweep_to_U","Anlorla/recover_from_U"]'
 ```
 
 **Parameters:**
@@ -589,11 +594,11 @@ python3 switch_mode.py 3   # Teleoperation Mode
 
 **Available Modes:**
 
-| Mode | Name | Arm Control | Gripper Control | Use Case |
-|------|------|-------------|-----------------|----------|
-| 1 | VLA with Gripper | VLA | VLA | Full VLA policy control |
-| 2 | VLA without Gripper | VLA | Separate | VLA arm control only |
-| 3 | Teleoperation | Teleop | Teleop | Data collection/Manual control |
+| Mode | Name                | Arm Control | Gripper Control | Use Case                       |
+| ---- | ------------------- | ----------- | --------------- | ------------------------------ |
+| 1    | VLA with Gripper    | VLA         | VLA             | Full VLA policy control        |
+| 2    | VLA without Gripper | VLA         | Separate        | VLA arm control only           |
+| 3    | Teleoperation       | Teleop      | Teleop          | Data collection/Manual control |
 
 #### Manual Configuration (Alternative)
 
