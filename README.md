@@ -306,12 +306,16 @@ After training starts, you can monitor your training progress and configuration 
 
 ### 1. Compute Normalization Statistics
 
-Before training, compute the normalization statistics for your dataset:
+Before training, compute the normalization statistics for your dataset.
+
+> **💡 Note:** You don't need to manually download the dataset first! The `compute_norm_stats.py` script will automatically download the dataset from HuggingFace Hub if it's not already cached locally. Just make sure your `repo_id` in the config is correct.
 
 ```bash
 cd openpi
 uv run python scripts/compute_norm_stats.py --config-name pi05_npm
 ```
+
+If you prefer to download the dataset manually beforehand (e.g., for offline use or to verify the data), you can use the commands in the [Dataset Download](#dataset-download) section.
 
 ### 2. Start Training
 
@@ -1020,3 +1024,53 @@ https://github.com/Jeong-zju/zeno-wholebody-teleop/tree/master
 ### Camara "No Image"
 
 After configuration, we need to source ~/.bashrc even if we don't modify anything.(Don't know why at present)
+
+### HuggingFace Dataset Tag Creation Error
+
+**Error:**
+
+```python
+>>> hub_api = HfApi()
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+NameError: name 'HfApi' is not defined
+```
+
+**Solution:**
+
+Import the `HfApi` class before using it:
+
+```python
+from huggingface_hub import HfApi
+
+hub_api = HfApi()
+hub_api.create_tag("your-username/your-dataset", tag="v2.1", repo_type="dataset")
+```
+
+**Common Use Cases:**
+
+1. **Create a version tag for your dataset:**
+   ```python
+   from huggingface_hub import HfApi
+
+   hub_api = HfApi()
+   hub_api.create_tag(
+       "Anlorla/recover_from_C_lerobot21",
+       tag="v2.1",
+       repo_type="dataset"
+   )
+   ```
+
+2. **Create a tag for a model checkpoint:**
+   ```python
+   from huggingface_hub import HfApi
+
+   hub_api = HfApi()
+   hub_api.create_tag(
+       "your-username/your-model",
+       tag="v1.0",
+       repo_type="model"
+   )
+   ```
+
+**Note:** Make sure you're logged in to HuggingFace CLI first: `huggingface-cli login`
